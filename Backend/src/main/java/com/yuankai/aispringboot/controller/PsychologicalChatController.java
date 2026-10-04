@@ -102,8 +102,12 @@ public class PsychologicalChatController {
     @GetMapping("/sessions")
     public Result<Page<ConsultationSessionResponseDTO>> getSessions(@Valid ConsultationSessionQueryDTO queryDTO) {
         Long userId = GetUserInfo.getUserId();
+        Integer roleType = GetUserInfo.getUserType();
 
-        Page<ConsultationSessionResponseDTO> sessionPage = consultationSessionService.getSessionsByPage(userId, queryDTO);
+        // 查询范围由角色决定（在 Service 层统一处理）：
+        // 管理员 → 全部用户的会话；普通用户 → 仅自己的会话
+        Page<ConsultationSessionResponseDTO> sessionPage =
+                consultationSessionService.getSessionsByPage(userId, roleType, queryDTO);
         return Result.success(sessionPage);
     }
 

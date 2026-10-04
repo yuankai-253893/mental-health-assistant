@@ -64,8 +64,9 @@ public class KnowledgeCategoryConvert {
                 .tags(articleDTO.getTags())
                 .authorId(userId)
                 .readCount(0)
-                .status(1)
-                .publishAt(now)
+                // 新建文章为草稿状态，发布时间留空，待发布时再写入
+                .status(0)
+                .publishAt(null)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

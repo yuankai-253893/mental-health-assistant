@@ -20,4 +20,8 @@ public class ConsultationSessionQueryDTO {
 
     // 情绪标签（可选，用于筛选）
     private String emotionTag;
+
+    // 按用户ID筛选（可选，仅管理员生效；普通用户固定查自己，该参数被忽略）
+    @Min(value = 1, message = "用户ID最小为1")
+    private Long userId;
 }

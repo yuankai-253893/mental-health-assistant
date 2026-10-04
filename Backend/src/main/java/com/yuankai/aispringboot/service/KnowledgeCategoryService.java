@@ -215,8 +215,8 @@ public class KnowledgeCategoryService {
             throw new BusinessException("该文章不存在");
         }
 
-        // 未发布(status=0)的文章仅管理员可查看；普通用户即使知道id也不能看，防止越权
-        if (Integer.valueOf(0).equals(knowledgeArticle.getStatus()) && !UserType.ADMIN.getCode().equals(roleType)) {
+        // 非已发布(草稿status=0、已下线status=2)的文章仅管理员可查看；普通用户即使知道id也不能看，防止越权
+        if (!Integer.valueOf(1).equals(knowledgeArticle.getStatus()) && !UserType.ADMIN.getCode().equals(roleType)) {
             throw new BusinessException("该文章不存在或未发布");
         }
 
@@ -323,12 +323,20 @@ public class KnowledgeCategoryService {
             throw new BusinessException("该文章不存在");
         }
 
-        if (updateDTO.getStatus() == null
-                || (!Integer.valueOf(0).equals(updateDTO.getStatus()) && !Integer.valueOf(1).equals(updateDTO.getStatus()))) {
+        // 状态取值：0-草稿，1-已发布，2-已下线
+        Integer status = updateDTO.getStatus();
+        if (status == null
+                || (!Integer.valueOf(0).equals(status)
+                && !Integer.valueOf(1).equals(status)
+                && !Integer.valueOf(2).equals(status))) {
             throw new BusinessException("输入状态值错误");
         }
 
-        knowledgeArticle.setStatus(updateDTO.getStatus());
+        knowledgeArticle.setStatus(status);
+        // 发布时写入发布时间
+        if (Integer.valueOf(1).equals(status)) {
+            knowledgeArticle.setPublishAt(LocalDateTime.now());
+        }
         knowledgeArticleMapper.updateById(knowledgeArticle);
     }
 

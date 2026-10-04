@@ -12,6 +12,9 @@ public class ConsultationSessionResponseDTO {
     // 用户ID
     private Long userId;
 
+    // 会话所属用户名（管理员查看全部会话时用于区分归属）
+    private String username;
+
     // 会话标题
     private String sessionTitle;
 

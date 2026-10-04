@@ -16,8 +16,10 @@ public class FileUploadDTO {
     private String businessType;
 
     // 3. 业务对象ID（用户ID，文章ID）
+    @NotBlank(message = "业务对象ID不能为空")
     private String businessId;
 
     // 4. 业务字段名（avatar, cover）
+    @NotBlank(message = "业务字段名不能为空")
     private String businessField;
 }
