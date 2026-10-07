@@ -29,4 +29,10 @@ public class ConsultationSessionResponseDTO {
 
     // 消息数量
     private Integer messageCount;
+
+    // 最后一条消息内容（列表预览用）
+    private String lastMessageContent;
+
+    // 最后一条消息时间（列表展示用）
+    private LocalDateTime lastMessageTime;
 }

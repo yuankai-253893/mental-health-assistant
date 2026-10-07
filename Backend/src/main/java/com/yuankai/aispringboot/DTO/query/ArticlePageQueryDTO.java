@@ -26,4 +26,7 @@ public class ArticlePageQueryDTO {
     // 排序方向（升序 asc 或 降序 desc，默认降序）
     @Pattern(regexp = "^(asc|desc)$", message = "排序方向只能是 asc 或 desc")
     private String sortDirection = "desc";
+
+    // 分类ID（可选）：传了就只查该分类下的文章，不传表示全部分类
+    private Long categoryId;
 }

@@ -19,20 +19,25 @@ public class EmotionDiaryCreateDTO {
 
     // 主要情绪
     @Size(max = 50, message = "主要情绪长度不能超过50个字符")
+    @NotBlank(message = "主要情绪不能为空")
     private String dominantEmotion;
 
     // 情绪触发因素
+    @NotBlank(message = "情绪触发因素不能为空")
     private String emotionTriggers;
 
     // 日记内容
+    @NotBlank(message = "日记内容不能为空")
     private String diaryContent;
 
     // 睡眠质量(1-5)
+    @NotNull(message = "睡眠质量不能为空")
     @Min(value = 1, message = "睡眠质量最低为1分")
     @Max(value = 5, message = "睡眠质量最高为5分")
     private Integer sleepQuality;
 
     // 压力水平(1-5)
+    @NotNull(message = "压力水平不能为空")
     @Min(value = 1, message = "压力水平最低为1分")
     @Max(value = 5, message = "压力水平最高为5分")
     private Integer stressLevel;

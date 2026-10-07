@@ -33,6 +33,13 @@ public class EmotionDiaryController {
         return Result.success(emotionDiary);
     }
 
+    // 查询当前用户今天的情绪日志，用于情绪日志页回显（今天未提交时 data 为 null）
+    @GetMapping("/today")
+    public Result<EmotionDiaryResponseDTO> getTodayEmotionDiary() {
+        Long userId = GetUserInfo.getUserId();
+        return Result.success(emotionDiaryService.getTodayEmotionDiary(userId));
+    }
+
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/admin/page")
     public Result<Page<EmotionDiaryResponseDTO>> getEmotionDiaryByPage(@Valid EmotionDiaryQueryDTO queryDTO) {

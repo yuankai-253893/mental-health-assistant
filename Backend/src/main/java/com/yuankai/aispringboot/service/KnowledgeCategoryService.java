@@ -169,8 +169,21 @@ public class KnowledgeCategoryService {
         Page<KnowledgeArticle> page = new Page<>(queryDTO.getCurrentPage(), queryDTO.getSize());
         LambdaQueryWrapper<KnowledgeArticle> queryWrapper = new LambdaQueryWrapper<>();
 
-        // 查询已发布文章（status=1），按阅读次数降序排列（DB 基线排序，增量未刷库时排序略有滞后，属最终一致可接受）
-        queryWrapper.eq(KnowledgeArticle::getStatus, 1).orderByDesc(KnowledgeArticle::getReadCount);
+        // 只查询已发布文章（status=1）
+        queryWrapper.eq(KnowledgeArticle::getStatus, 1);
+        // 分类筛选：传了 categoryId 才拼接条件，null 表示「全部」
+        queryWrapper.eq(queryDTO.getCategoryId() != null, KnowledgeArticle::getCategoryId, queryDTO.getCategoryId());
+
+        // 按 sortField / sortDirection 动态排序（sortDirection 默认 desc，sortField 默认 readCount）
+        // 阅读量排序基于数据库基线值，Redis 增量未刷库时排序略有滞后，属最终一致可接受
+        // @Pattern 允许 null 通过，这里兜底默认值，避免 switch 收到 null 抛 NPE
+        String sortField = StrUtil.blankToDefault(queryDTO.getSortField(), "readCount");
+        boolean isAsc = "asc".equalsIgnoreCase(queryDTO.getSortDirection());
+        switch (sortField) {
+            case "publishAt" -> queryWrapper.orderBy(true, isAsc, KnowledgeArticle::getPublishAt);
+            case "createdAt" -> queryWrapper.orderBy(true, isAsc, KnowledgeArticle::getCreatedAt);
+            default -> queryWrapper.orderBy(true, isAsc, KnowledgeArticle::getReadCount);
+        }
         Page<KnowledgeArticle> articlePage = knowledgeArticleMapper.selectPage(page, queryWrapper);
 
         // 合成阅读量：DB 基线 + Redis 增量

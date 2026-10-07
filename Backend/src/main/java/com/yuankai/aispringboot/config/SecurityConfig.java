@@ -25,6 +25,9 @@ public class SecurityConfig {
             "/api/user/login",
             "/api/user/add",
             "/files/**",
+            "/api/knowledge/category/tree",
+            "/api/knowledge/article/page",      // 知识库读接口：未登录用户也能浏览分类与已发布文章
+            "/api/knowledge/article/*",
     };
 
     public static Boolean isPublicPath(String requestUrl) {

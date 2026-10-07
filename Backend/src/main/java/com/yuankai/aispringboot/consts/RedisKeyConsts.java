@@ -24,4 +24,7 @@ public final class RedisKeyConsts {
 
     /** 文章阅读量增量缓存前缀，完整 key = article:read:{articleId}（INCR 原子自增，定时刷库） */
     public static final String ARTICLE_READ_KEY_PREFIX = "article:read:";
+
+    /** 注册 IP 限流前缀，完整 key = register:ip:{ip}（同 IP 一天最多注册 3 个账号，TTL 1 天） */
+    public static final String REGISTER_LIMIT_PREFIX = "register:ip:";
 }

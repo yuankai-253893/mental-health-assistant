@@ -133,7 +133,12 @@ public class PsychologicalSupportService {
     public static Long extractSessionId(String sessionId) {
         if (sessionId != null && sessionId.startsWith("session_")) {
             String idstr = sessionId.substring("session_".length());
-            return Long.parseLong(idstr);
+            try {
+                return Long.parseLong(idstr);
+            } catch (NumberFormatException e) {
+                // 非法 sessionId（如 session_abc）不抛 500，统一按"格式错误"处理（返回 null 由调用方提示）
+                return null;
+            }
         }
         return null;
     }

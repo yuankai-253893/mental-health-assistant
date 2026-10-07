@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yuankai.aispringboot.DTO.command.ConsultationSessionCreateDTO;
 import com.yuankai.aispringboot.DTO.query.ConsultationSessionQueryDTO;
+import com.yuankai.aispringboot.DTO.response.ConsultationMessageResponseDTO;
 import com.yuankai.aispringboot.DTO.response.ConsultationSessionResponseDTO;
 import com.yuankai.aispringboot.DTO.response.EmotionAnalysisResponseDTO;
 import com.yuankai.aispringboot.common.ResultCode;
@@ -42,6 +43,9 @@ public class ConsultationSessionService {
     @Autowired
     private ConsultationMessageMapper consultationMessageMapper;
 
+    @Autowired
+    private ConsultationMessageService consultationMessageService;
+
     public ConsultationSession createSession (Long userId, ConsultationSessionCreateDTO createDTO){
         // 验证用户是否存在
         User user = userMapper.selectById(userId);
@@ -69,6 +73,17 @@ public class ConsultationSessionService {
     // 根据会话ID查询会话，用于校验会话归属
     public ConsultationSession getConsultationSessionBySessionId(Long sessionId) {
         return consultationSessionMapper.selectById(sessionId);
+    }
+
+    // 修改会话标题
+    @Transactional
+    public void updateSessionTitle(Long sessionId, String sessionTitle) {
+        ConsultationSession session = consultationSessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException(ResultCode.SESSION_NOT_FOUND.getCode(), ResultCode.SESSION_NOT_FOUND.getMsg());
+        }
+        session.setSessionTitle(sessionTitle);
+        consultationSessionMapper.updateById(session);
     }
 
     /**
@@ -152,6 +167,13 @@ public class ConsultationSessionService {
         countWrapper.eq(ConsultationMessage::getSessionId, session.getId());
         Long messageCount = consultationMessageMapper.selectCount(countWrapper);
         responseDTO.setMessageCount(messageCount.intValue());
+
+        // 补充最后一条消息，用于列表展示会话预览与最近时间
+        ConsultationMessageResponseDTO lastMessage = consultationMessageService.getLastMessageBySessionId(session.getId());
+        if (lastMessage != null) {
+            responseDTO.setLastMessageContent(lastMessage.getContent());
+            responseDTO.setLastMessageTime(lastMessage.getCreatedAt());
+        }
 
         return responseDTO;
     }

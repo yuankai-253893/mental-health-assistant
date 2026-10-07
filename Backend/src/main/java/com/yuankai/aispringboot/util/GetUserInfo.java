@@ -9,16 +9,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 /**
  * 从当前请求中获取登录用户信息。
  *
- * 为什么不再每次都验签：
- * JWT 验签是一次 HMAC-SHA256 计算。原实现每个 getter 都要重新解析一遍 token，
- * 而一个 Controller 方法常常同时调用 getUserId() + getUserType()，
- * 等于一次请求验签 2-3 次，属于纯粹的重复计算。
- *
  * JwtAuthenticationFilter 验签通过后，把结果缓存到请求属性
  * {@link JwtAuthenticationFilter#JWT_USER_ATTR}，直接读取 —— 一次请求只验一次签。
  * 请求属性随请求销毁，不存在 ThreadLocal 泄漏问题（Tomcat 线程复用串号风险）。
  *
- * 兜底：非 Web 环境（如单元测试）拿不到请求上下文时，才真正走一次验签，行为保持不变。
+ * 非 Web 环境拿不到请求上下文时，走一次验签，行为保持不变。
  */
 public class GetUserInfo {
 
@@ -60,5 +55,33 @@ public class GetUserInfo {
             throw new JWTVerificationException("Token 无效或已过期");
         }
         return result;
+    }
+
+    /**
+     * 空安全取值：未登录（没有 token）或 token 无效/过期时返回 null，不抛异常。
+     *
+     * 使用场景：可以匿名访问、但登录后需要区分身份的接口。
+     * 注意公开路径（SecurityConfig.PUBLIC_PATH）会被 JwtAuthenticationFilter.shouldNotFilter 整体跳过，
+     * 请求属性里没有验签缓存，此时会走上面的兜底验签：
+     * 携带合法 token 的登录用户仍能取到真实身份，完全匿名的请求则返回 null。
+     */
+    public static JwtTokenUtil.TokenVerificationResult getCurrentUserOrNull() {
+        try {
+            return getCurrentUser();
+        } catch (JWTVerificationException e) {
+            return null;
+        }
+    }
+
+    // 获取用户ID，未登录时返回 null
+    public static Long getUserIdOrNull() {
+        JwtTokenUtil.TokenVerificationResult result = getCurrentUserOrNull();
+        return result == null ? null : result.getUserId();
+    }
+
+    // 获取用户角色类型，未登录时返回 null
+    public static Integer getUserTypeOrNull() {
+        JwtTokenUtil.TokenVerificationResult result = getCurrentUserOrNull();
+        return result == null ? null : result.getRoleType();
     }
 }

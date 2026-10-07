@@ -32,6 +32,9 @@ public class ArticleResponseDTO {
     // 作者ID
     private Long authorId;
 
+    // 作者名称（详情页需要展示，与列表 DTO 保持一致）
+    private String authorName;
+
     // 阅读次数
     private Integer readCount;
 

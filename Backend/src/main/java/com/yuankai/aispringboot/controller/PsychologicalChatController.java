@@ -6,6 +6,7 @@ import com.yuankai.aispringboot.AiService.PsychologicalSupportService;
 import com.yuankai.aispringboot.AiService.StructOutPut;
 import com.yuankai.aispringboot.annotation.OperationLog;
 import com.yuankai.aispringboot.DTO.command.ConsultationSessionCreateDTO;
+import com.yuankai.aispringboot.DTO.command.ConsultationSessionTitleUpdateDTO;
 import com.yuankai.aispringboot.DTO.command.ConsultationStreamDTO;
 import com.yuankai.aispringboot.DTO.query.ConsultationSessionQueryDTO;
 import com.yuankai.aispringboot.DTO.response.ConsultationMessageResponseDTO;
@@ -146,6 +147,27 @@ public class PsychologicalChatController {
         // 管理员：不做归属校验，可删除所有会话
 
         consultationSessionService.deleteSession(sessionId, userId);
+        return Result.success();
+    }
+
+    // 修改会话标题
+    @OperationLog("修改会话标题")
+    @PutMapping("/sessions/{sessionId}/title")
+    public Result<?> updateSessionTitle(@PathVariable Long sessionId,
+                                        @Valid @RequestBody ConsultationSessionTitleUpdateDTO updateDTO) {
+        Long userId = GetUserInfo.getUserId();
+        Integer roleType = GetUserInfo.getUserType();
+
+        // 普通用户：校验会话归属，仅能修改自己的会话标题
+        if (UserType.USER.getCode().equals(roleType)) {
+            ConsultationSession session = consultationSessionService.getConsultationSessionBySessionId(sessionId);
+            if (session == null || !userId.equals(session.getUserId())) {
+                throw new BusinessException(ResultCode.ACCESS_UNAUTHORIZED.getCode(), ResultCode.ACCESS_UNAUTHORIZED.getMsg());
+            }
+        }
+        // 管理员：不做归属校验，可修改所有会话标题
+
+        consultationSessionService.updateSessionTitle(sessionId, updateDTO.getSessionTitle());
         return Result.success();
     }
 

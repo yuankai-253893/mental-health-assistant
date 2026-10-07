@@ -19,6 +19,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.concurrent.TimeUnit;
 
@@ -31,6 +33,10 @@ public class UserService {
     // 登录防暴力破解：同一账号失败达到阈值后锁定
     private static final int MAX_LOGIN_FAIL_TIMES = 5;               // 最大失败次数阈值
     private static final long LOCK_MINUTES = 15;                     // 锁定时长：15分钟
+
+    // 注册 IP 限流：同一 IP 一天最多注册的账号数（防脚本批量注册）
+    private static final int MAX_REGISTER_TIMES_PER_IP = 3;
+    private static final long REGISTER_LIMIT_DAYS = 1;               // 统计窗口：1 天
 
     @Resource
     private UserMapper userMapper;
@@ -56,7 +62,7 @@ public class UserService {
         } catch (Exception e) {
             log.warn("登录限流查询失败（Redis 不可用？），fail-open 跳过限流检查", e);
         }
-        if (failCountStr != null && Integer.parseInt(failCountStr) >= MAX_LOGIN_FAIL_TIMES) {
+        if (failCountStr != null && parseFailCount(failCountStr) >= MAX_LOGIN_FAIL_TIMES) {
             throw new BusinessException("登录失败次数过多，请" + LOCK_MINUTES + "分钟后再试");
         }
 
@@ -119,8 +125,63 @@ public class UserService {
         }
     }
 
+    // 安全解析失败次数：Redis 中值被写坏（脏数据/手动改库成非数字）时按 0 处理，
+    // 避免 Integer.parseInt 抛异常导致登录 500（与 fail-open 策略一致，登录不被非关键数据阻断）
+    private int parseFailCount(String failCountStr) {
+        try {
+            return Integer.parseInt(failCountStr);
+        } catch (NumberFormatException e) {
+            log.warn("登录失败次数值异常（{}），按 0 处理", failCountStr);
+            return 0;
+        }
+    }
+
+    // ---------------- 注册 IP 限流 ----------------
+
+    // 检查当前 IP 当日注册数是否已达上限：达上限直接抛业务异常，未达则放行
+    // 注意：这里是"先查后增"，极端并发下（同一 IP 同一天几乎同时发起 3 次注册）可能短暂越过上限，
+    // 对个人项目可接受；若需严格原子可改为 INCR 后判断、超限 DECR 回退（会多一次写）
+    private void checkRegisterIpLimit() {
+        String countStr = null;
+        try {
+            countStr = redisCounterUtil.get(RedisKeyConsts.REGISTER_LIMIT_PREFIX + getClientIp());
+        } catch (Exception e) {
+            log.warn("注册限流查询失败（Redis 不可用？），fail-open 放行", e);
+            return;
+        }
+        if (countStr != null && parseFailCount(countStr) >= MAX_REGISTER_TIMES_PER_IP) {
+            throw new BusinessException("同一 IP 一天最多注册 " + MAX_REGISTER_TIMES_PER_IP + " 个账号，请明天再试");
+        }
+    }
+
+    // 注册成功后计数 +1，并刷新 TTL（1 天）
+    private void recordRegisterIp() {
+        try {
+            redisCounterUtil.incrementWithExpire(
+                    RedisKeyConsts.REGISTER_LIMIT_PREFIX + getClientIp(),
+                    REGISTER_LIMIT_DAYS, TimeUnit.DAYS);
+        } catch (Exception e) {
+            log.warn("记录注册次数失败（Redis 不可用？），fail-open 继续", e);
+        }
+    }
+
+    // 获取客户端 IP：直接取连接地址。
+    // 若部署在 Nginx 等反向代理之后，应改为从 X-Forwarded-For 取第一个非内网 IP（注意该头可伪造，需配合可信代理）
+    private String getClientIp() {
+        ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attrs != null) {
+            return attrs.getRequest().getRemoteAddr();
+        }
+        return "unknown";
+    }
+
     public UserLoginResponseDTO.UserDetailResponseDTO register(UserRegisterCommandDTO commandDTO) {
         log.info("用户注册: {}", commandDTO.getUsername());
+
+        // IP 维度注册限流：同一 IP 一天最多注册 3 个账号（防批量注册/灌垃圾账号）
+        // fail-open：Redis 不可用时查询抛异常 → 视为未注册放行，注册不因 Redis 故障而中断
+        checkRegisterIpLimit();
+
         // 验证密码是否一致
         if (!commandDTO.getPassword().equals(commandDTO.getConfirmPassword())) {
             throw new BusinessException("两次输入密码不一致");
@@ -153,6 +214,9 @@ public class UserService {
 
         // 输入数据库
         userMapper.insert(user);
+
+        // 注册成功后才计数（失败的注册请求不消耗 IP 配额）
+        recordRegisterIp();
 
         return UserConvert.entityToDetailResponse(user);
     }

@@ -51,4 +51,28 @@ public interface EmotionDiaryMapper extends BaseMapper<EmotionDiary> {
        ) t
     """)
     Long selectTodayActiveUsers();
+
+    @Select("SELECT COUNT(*) FROM emotion_diary WHERE DATE(created_at) = CURDATE()")
+    Long selectTodayNewDiaries();
+
+    @Select("""
+        SELECT DATE(created_at) AS date,
+               COUNT(DISTINCT user_id) AS cnt
+        FROM emotion_diary
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        GROUP BY DATE(created_at)
+        """)
+    List<Map<String, Object>> selectLast7DaysDiaryUsers();
+
+    @Select("""
+        SELECT date, COUNT(DISTINCT uid) AS cnt FROM (
+            SELECT DATE(created_at) AS date, user_id AS uid FROM emotion_diary
+            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+            UNION ALL
+            SELECT DATE(started_at) AS date, user_id AS uid FROM consultation_session
+            WHERE started_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        ) t
+        GROUP BY date
+        """)
+    List<Map<String, Object>> selectLast7DaysActiveUsers();
 }

@@ -16,6 +16,9 @@ public class ArticleSimpleResponseDTO {
 
     private String summary;
 
+    // 封面图片（相对路径），用户端列表需要展示
+    private String cover;
+
     private Integer readCount;
 
     private Integer status;

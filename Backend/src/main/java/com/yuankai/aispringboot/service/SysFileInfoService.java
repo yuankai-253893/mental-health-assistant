@@ -16,6 +16,7 @@ import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -68,7 +69,8 @@ public class SysFileInfoService {
             throw new BusinessException(ResultCode.FILE_CONTENT_INVALID.getMsg());
         }
 
-        String timestampName = System.currentTimeMillis() + ext;
+        // 文件名使用 UUID 保证全局唯一：
+        String timestampName = UUID.randomUUID().toString().replace("-", "") + ext;
 
         // 5. 拼接最终的本地物理路径和URL路径
         String relativePath = realBusinessType + "/" + timestampName;

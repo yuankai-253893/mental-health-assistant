@@ -30,11 +30,10 @@ public class KnowledgeCategoryController {
     @Autowired
     private KnowledgeCategoryService knowledgeCategoryService;
 
-    // 查询知识文章分类
+    // 查询知识文章分类（公开接口，未登录也可访问）
     @GetMapping("/category/tree")
     public Result<List<CategoryResponseDTO>> getCategoryTree() {
-        Long userId = GetUserInfo.getUserId();
-        log.info("用户{}查询知识文章分类树", userId);
+        log.info("用户{}查询知识文章分类树", GetUserInfo.getUserIdOrNull());
 
         List<CategoryResponseDTO> categoryTree = knowledgeCategoryService.getCategoryTree();
 
@@ -50,12 +49,12 @@ public class KnowledgeCategoryController {
         return Result.success(result);
     }
 
-    // 查询知识文章列表（用户端：推荐阅读，按阅读量等排序）
+    // 查询知识文章列表（用户端：推荐阅读，按阅读量等排序。公开接口，未登录也可访问）
     @GetMapping("/article/page")
     public Result<Page<ArticleSimpleResponseDTO>> getUserArticleByPage(@Valid ArticlePageQueryDTO queryDTO) {
         Page<ArticleSimpleResponseDTO> result = knowledgeCategoryService.getArticleByPage(queryDTO);
 
-        log.info("用户{}查询知识文章列表", GetUserInfo.getUserId());
+        log.info("用户{}查询知识文章列表", GetUserInfo.getUserIdOrNull());
         return Result.success(result);
     }
 
@@ -71,12 +70,12 @@ public class KnowledgeCategoryController {
         return Result.success(result);
     }
 
-    // 查询知识文章详情
+    // 查询知识文章详情（公开接口；未登录只能看已发布文章，管理员可看草稿）
     @GetMapping("/article/{id}")
     public Result<ArticleResponseDTO> getArticleById(@PathVariable String id) {
-        ArticleResponseDTO result = knowledgeCategoryService.getArticleById(id, GetUserInfo.getUserType());
+        ArticleResponseDTO result = knowledgeCategoryService.getArticleById(id, GetUserInfo.getUserTypeOrNull());
 
-        log.info("用户{}查询文章：{}", GetUserInfo.getUserId(), id);
+        log.info("用户{}查询文章：{}", GetUserInfo.getUserIdOrNull(), id);
         return Result.success(result);
     }
 

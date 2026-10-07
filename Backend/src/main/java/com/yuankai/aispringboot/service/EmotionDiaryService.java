@@ -8,20 +8,30 @@ import com.yuankai.aispringboot.DTO.query.EmotionDiaryQueryDTO;
 import com.yuankai.aispringboot.DTO.response.EmotionDiaryResponseDTO;
 import com.yuankai.aispringboot.common.ResultCode;
 import com.yuankai.aispringboot.entity.EmotionDiary;
+import com.yuankai.aispringboot.entity.User;
 import com.yuankai.aispringboot.exception.BusinessException;
 import com.yuankai.aispringboot.mapper.EmotionDiaryMapper;
+import com.yuankai.aispringboot.mapper.UserMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class EmotionDiaryService {
     @Autowired
     private EmotionDiaryMapper emotionDiaryMapper;
+
+    @Autowired
+    private UserMapper userMapper;
 
     @Autowired
     private ActiveUserRecordService activeUserRecordService;
@@ -53,6 +63,15 @@ public class EmotionDiaryService {
                 .eq(EmotionDiary::getDiaryDate, dto.getDiaryDate());
         EmotionDiary saved = emotionDiaryMapper.selectOne(queryWrapper);
         return convertToResponseDTO(saved);
+    }
+
+    // 查询当前用户今天的情绪日记，用于页面回显；今天还没提交过则返回 null
+    public EmotionDiaryResponseDTO getTodayEmotionDiary(Long userId) {
+        LambdaQueryWrapper<EmotionDiary> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(EmotionDiary::getUserId, userId)
+                .eq(EmotionDiary::getDiaryDate, LocalDate.now());
+        EmotionDiary diary = emotionDiaryMapper.selectOne(queryWrapper);
+        return diary == null ? null : convertToResponseDTO(diary);
     }
 
     public Page<EmotionDiaryResponseDTO> getEmotionDiaryByPage(EmotionDiaryQueryDTO queryDTO) {
@@ -94,8 +113,25 @@ public class EmotionDiaryService {
 
         // 转换为响应DTO
         Page<EmotionDiaryResponseDTO> responsePage = new Page<>(emotionDiaryPage.getCurrent(), emotionDiaryPage.getSize(), emotionDiaryPage.getTotal());
-        responsePage.setRecords(emotionDiaryPage.getRecords().stream().map(this::convertToResponseDTO).toList());
+        List<EmotionDiaryResponseDTO> records = emotionDiaryPage.getRecords().stream().map(this::convertToResponseDTO).toList();
+        responsePage.setRecords(records);
 
+        // 批量补全用户名/昵称，便于管理员识别记录归属
+        Set<Long> userIds = records.stream()
+                .map(EmotionDiaryResponseDTO::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (!userIds.isEmpty()) {
+            Map<Long, User> userMap = userMapper.selectByIds(userIds).stream()
+                    .collect(Collectors.toMap(User::getId, user -> user, (a, b) -> a));
+            records.forEach(dto -> {
+                User user = userMap.get(dto.getUserId());
+                if (user != null) {
+                    dto.setUsername(user.getUsername());
+                    dto.setNickname(user.getNickname());
+                }
+            });
+        }
 
         return responsePage;
     }
