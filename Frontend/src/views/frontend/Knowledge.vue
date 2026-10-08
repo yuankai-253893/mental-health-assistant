@@ -80,7 +80,7 @@
 <script setup>
     import { dayjs } from 'element-plus'
     import { ref, reactive, onMounted } from 'vue'
-    import { getKnowledgeList, getKnowledgeCategoryTree } from '@/api/user'
+    import { getArticlePage, getCategoryTree } from '@/api/knowledge'
     import { useRouter } from 'vue-router'
     import iconUrl from '@/assets/images/book.png'
     import coverPlaceholder from '@/assets/images/hero.png'
@@ -121,7 +121,7 @@
         if (activeCategoryId.value !== null) {
             params.categoryId = activeCategoryId.value
         }
-        getKnowledgeList(params).then(res => {
+        getArticlePage(params).then(res => {
             articleList.value = res.records
             pagination.total = res.total
         }).catch(() => {
@@ -136,7 +136,7 @@
     // 构建分类 id -> 名称映射（分类树既可能是扁平的，也可能是嵌套的，这里都兼容），
     // 同时拍平成分类导航的数据源
     const loadCategoryMap = () => {
-        getKnowledgeCategoryTree().then(res => {
+        getCategoryTree().then(res => {
             const map = {}
             const flat = []
             const walk = (list) => {
@@ -178,7 +178,7 @@
         getPageList()
         loadCategoryMap()
         // 推荐阅读：按阅读量倒序取前 5 篇
-        getKnowledgeList({
+        getArticlePage({
             sortField: 'readCount',
             sortDirection: 'desc',
             currentPage: 1,

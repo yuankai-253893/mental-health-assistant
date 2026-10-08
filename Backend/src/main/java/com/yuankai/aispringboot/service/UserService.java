@@ -2,18 +2,22 @@ package com.yuankai.aispringboot.service;
 
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yuankai.aispringboot.DTO.command.UserLoginCommandDTO;
 import com.yuankai.aispringboot.DTO.command.UserRegisterCommandDTO;
+import com.yuankai.aispringboot.DTO.query.UserQueryDTO;
 import com.yuankai.aispringboot.common.ResultCode;
 import com.yuankai.aispringboot.consts.RedisKeyConsts;
 import com.yuankai.aispringboot.DTO.response.UserLoginResponseDTO;
 import com.yuankai.aispringboot.entity.User;
+import com.yuankai.aispringboot.enumclass.UserStatus;
 import com.yuankai.aispringboot.enumclass.UserType;
 import com.yuankai.aispringboot.exception.BusinessException;
 import com.yuankai.aispringboot.mapper.UserMapper;
 import com.yuankai.aispringboot.service.convert.UserConvert;
 import com.yuankai.aispringboot.util.JwtTokenUtil;
 import com.yuankai.aispringboot.util.RedisCounterUtil;
+import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +26,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static com.yuankai.aispringboot.util.JwtTokenUtil.generateToken;
@@ -166,7 +172,6 @@ public class UserService {
     }
 
     // 获取客户端 IP：直接取连接地址。
-    // 若部署在 Nginx 等反向代理之后，应改为从 X-Forwarded-For 取第一个非内网 IP（注意该头可伪造，需配合可信代理）
     private String getClientIp() {
         ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attrs != null) {
@@ -241,5 +246,109 @@ public class UserService {
             // 将 Token 加入 Redis 黑名单
             redisTokenBlacklist.addToBlacklist(token, expireMillis);
         }
+    }
+
+    // ==================== 管理端用户管理 ====================
+
+    /**
+     * 用户分页查询（管理员）。
+     * 返回的是 UserDetailResponseDTO 而不是 User 实体 —— 实体带 password 字段，
+     * 一旦直接序列化就会把密码哈希泄露给前端。
+     */
+    public Page<UserLoginResponseDTO.UserDetailResponseDTO> getUserPage(UserQueryDTO queryDTO) {
+        Page<User> page = new Page<>(queryDTO.getCurrentPage(), queryDTO.getSize());
+
+        LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
+        if (StrUtil.isNotBlank(queryDTO.getUsername())) {
+            queryWrapper.like(User::getUsername, queryDTO.getUsername());
+        }
+        if (StrUtil.isNotBlank(queryDTO.getNickname())) {
+            queryWrapper.like(User::getNickname, queryDTO.getNickname());
+        }
+        if (queryDTO.getStatus() != null) {
+            queryWrapper.eq(User::getStatus, queryDTO.getStatus());
+        }
+        if (queryDTO.getUserType() != null) {
+            queryWrapper.eq(User::getUserType, queryDTO.getUserType());
+        }
+        // 新注册用户排在前面，便于管理员第一时间看到
+        queryWrapper.orderByDesc(User::getId);
+
+        Page<User> userPage = userMapper.selectPage(page, queryWrapper);
+
+        List<UserLoginResponseDTO.UserDetailResponseDTO> records = userPage.getRecords().stream()
+                .map(UserConvert::entityToDetailResponse)
+                .toList();
+
+        Page<UserLoginResponseDTO.UserDetailResponseDTO> responsePage =
+                new Page<>(userPage.getCurrent(), userPage.getSize(), userPage.getTotal());
+        responsePage.setRecords(records);
+        return responsePage;
+    }
+
+    /**
+     * 修改用户状态（禁用 / 启用）。
+     *
+     * 禁用后无需额外处理 token：JwtAuthenticationFilter 每次请求都会查一次用户状态，
+     * 命中 isActive()==false 直接返回 token 已被禁止访问，旧 token 立即失效。
+     *
+     * @param operatorId 当前操作者 id，用于拦截「管理员禁用自己」这种自锁操作
+     */
+    public void updateUserStatus(Long userId, Integer status, Long operatorId) {
+        if (!UserStatus.NORMAL.getCode().equals(status) && !UserStatus.DISABLED.getCode().equals(status)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户状态只能是 0(禁用) 或 1(正常)");
+        }
+
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.USER_NOT_EXIST.getCode(), ResultCode.USER_NOT_EXIST.getMsg());
+        }
+
+        // 不允许禁用自己：否则会把自己锁在后台之外，只能改数据库才能恢复
+        if (userId.equals(operatorId) && UserStatus.DISABLED.getCode().equals(status)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "不能禁用当前登录的管理员账号");
+        }
+
+        if (status.equals(user.getStatus())) {
+            return;
+        }
+
+        User update = new User();
+        update.setId(userId);
+        update.setStatus(status);
+        update.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(update);
+
+        log.info("管理员{}将用户{}（{}）状态修改为{}", operatorId, userId, user.getUsername(),
+                UserStatus.fromCode(status).getDescription());
+    }
+
+    /**
+     * 重置用户密码（管理员）。
+     *
+     * 已知限制：JWT 是无状态的，改密码不会让已签发的 token 失效
+     * （token 里不携带密码信息）。若需要「改密即踢下线」，得再引入
+     * 按用户的失效时间戳，当前未实现。
+     */
+    public void resetPassword(Long userId, String newPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.USER_NOT_EXIST.getCode(), ResultCode.USER_NOT_EXIST.getMsg());
+        }
+
+        User update = new User();
+        update.setId(userId);
+        update.setPassword(PasswordEncoder.encode(newPassword.trim()));
+        update.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(update);
+
+        // 清掉该账号残留的登录失败计数，避免用新密码登录时被旧的锁定计数拦住
+        try {
+            redisCounterUtil.delete(RedisKeyConsts.LOGIN_FAIL_PREFIX + user.getUsername());
+        } catch (Exception e) {
+            log.warn("清除用户{}登录失败计数失败（Redis 不可用？）", user.getUsername(), e);
+        }
+
+        log.info("管理员重置了用户{}（{}）的密码", userId, user.getUsername());
     }
 }

@@ -1,7 +1,11 @@
 package com.yuankai.aispringboot.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yuankai.aispringboot.DTO.command.UserLoginCommandDTO;
+import com.yuankai.aispringboot.DTO.command.UserPasswordUpdateDTO;
 import com.yuankai.aispringboot.DTO.command.UserRegisterCommandDTO;
+import com.yuankai.aispringboot.DTO.command.UserStatusUpdateDTO;
+import com.yuankai.aispringboot.DTO.query.UserQueryDTO;
 import com.yuankai.aispringboot.DTO.response.UserLoginResponseDTO;
 import com.yuankai.aispringboot.annotation.OperationLog;
 import com.yuankai.aispringboot.common.Result;
@@ -9,8 +13,10 @@ import com.yuankai.aispringboot.service.UserService;
 import com.yuankai.aispringboot.util.GetUserInfo;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -62,6 +68,38 @@ public class UserController {
         userService.logout(userId);
         log.info("用户 {} 已退出登录", userId);
 
+        return Result.success();
+    }
+
+    // ==================== 管理端用户管理 ====================
+
+    // 用户分页查询（支持按用户名、昵称、状态、用户类型筛选）
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/admin/page")
+    public Result<Page<UserLoginResponseDTO.UserDetailResponseDTO>> getUserPage(@Valid UserQueryDTO queryDTO) {
+        Page<UserLoginResponseDTO.UserDetailResponseDTO> result = userService.getUserPage(queryDTO);
+        log.info("管理员{}查询用户列表", GetUserInfo.getUserId());
+        return Result.success(result);
+    }
+
+    // 禁用 / 启用用户
+    @PreAuthorize("hasRole('ADMIN')")
+    @OperationLog("修改用户状态")
+    @PutMapping("/admin/{id}/status")
+    public Result<?> updateUserStatus(@Min(value = 1, message = "用户ID不合法") @PathVariable Long id,
+                                      @Valid @RequestBody UserStatusUpdateDTO updateDTO) {
+        userService.updateUserStatus(id, updateDTO.getStatus(), GetUserInfo.getUserId());
+        return Result.success();
+    }
+
+    // 重置用户密码
+    @PreAuthorize("hasRole('ADMIN')")
+    @OperationLog("重置用户密码")
+    @PutMapping("/admin/{id}/password")
+    public Result<?> resetPassword(@Min(value = 1, message = "用户ID不合法") @PathVariable Long id,
+                                   @Valid @RequestBody UserPasswordUpdateDTO updateDTO) {
+        userService.resetPassword(id, updateDTO.getNewPassword());
+        log.info("管理员{}重置用户{}密码", GetUserInfo.getUserId(), id);
         return Result.success();
     }
 

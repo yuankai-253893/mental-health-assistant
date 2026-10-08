@@ -48,31 +48,4 @@ public class ConsultationMessage {
     // 创建时间
     @TableField("created_at")
     private LocalDateTime createdAt;
-
-    /**
-     * 获取发送者类型描述
-     */
-    public String getSenderTypeDesc() {
-        if (senderType == null) {
-            return "未知";
-        }
-        return switch (senderType) {
-            case 1 -> "用户";
-            case 2 -> "AI助手";
-            default -> "未知";
-        };
-    }
-
-    /**
-     * 获取消息类型描述
-     */
-    public String getMessageTypeDesc() {
-        if (messageType == null) {
-            return "未知";
-        }
-        return switch (messageType) {
-            case 1 -> "文本";
-            default -> "未知";
-        };
-    }
 }

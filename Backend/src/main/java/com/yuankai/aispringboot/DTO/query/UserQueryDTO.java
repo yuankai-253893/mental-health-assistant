@@ -5,9 +5,13 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+/**
+ * 管理端用户分页查询条件。
+ * 所有筛选项都是可选的，不传即不参与 WHERE 拼接。
+ */
 @Data
-public class EmotionDiaryQueryDTO {
-    // 当前页码（与其余查询 DTO 统一命名为 currentPage）
+public class UserQueryDTO {
+    // 当前页码
     @NotNull(message = "当前页码不能为空")
     @Min(value = 1, message = "当前页码最小为1")
     private Integer currentPage;
@@ -18,17 +22,15 @@ public class EmotionDiaryQueryDTO {
     @Max(value = 100, message = "每页大小最大为100")
     private Integer size;
 
-    // 用户ID
-    private Long userId;
+    // 用户名（可选，模糊匹配）
+    private String username;
 
-    // 最小情绪分数
-    @Min(value = 1, message = "最小情绪分数最小为1")
-    private Integer minMoodScore;
+    // 昵称（可选，模糊匹配）
+    private String nickname;
 
-    // 最大情绪分数
-    @Max(value = 10, message = "最大情绪分数最大为10")
-    private Integer maxMoodScore;
+    // 状态（可选）0:禁用 1:正常
+    private Integer status;
 
-    // 主要情绪
-    private String dominantEmotion;
+    // 用户类型（可选）1:普通用户 2:管理员
+    private Integer userType;
 }

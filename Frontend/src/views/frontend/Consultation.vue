@@ -218,8 +218,8 @@
 
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { startSession, getSessionList, deleteSession, getSessionDetail, getSessionEmotion, updateSessionTitle } from '@/api/user'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { startSession, getSessionPage, deleteSession, getSessionMessages, getSessionEmotion, updateSessionTitle } from '@/api/consultation'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatRound, DeleteFilled } from '@element-plus/icons-vue'
 import MarkdownRenderer from '@/components/frontend/MarkdownRenderer.vue'
@@ -271,17 +271,53 @@ const defaultEmotion = {
 
 const currentEmotion = ref({ ...defaultEmotion })
 
+// 服务端在 SSE 结束后才异步做情绪分析，done 事件到达时结果可能还没落库，
+// 因此这里按固定间隔回查若干次，直到 lastEmotionUpdatedAt 发生变化或达到上限。
+const EMOTION_POLL_INTERVAL = 1500
+const EMOTION_POLL_MAX = 4
+let emotionPollTimer = null
+
+const stopEmotionPolling = () => {
+    if (emotionPollTimer) {
+        clearTimeout(emotionPollTimer)
+        emotionPollTimer = null
+    }
+}
+
+// 拉取一次情绪分析结果，返回该次分析的时间戳（用于判断服务端是否已写入新一轮结果）
 const loadSessionEmotion = (sessionId) => {
     // 后端 /session/{sessionId}/emotion 的 sessionId 是 Long，需去掉 SSE 流使用的 "session_" 前缀
     const id = String(sessionId).replace(/^session_/, '')
 
-    getSessionEmotion(id).then(res => {
+    return getSessionEmotion(id).then(res => {
         // 接口返回 { sessionId, lastEmotionAnalysis, lastEmotionUpdatedAt }
         // 真正的分析结果在 lastEmotionAnalysis 中，且尚未生成时为 null
         currentEmotion.value = { ...defaultEmotion, ...(res?.lastEmotionAnalysis || {}) }
+        return res?.lastEmotionUpdatedAt || null
     }).catch(() => {
         // 情绪分析拉取失败（如尚未生成）时保持默认值，不打断对话
+        return null
     })
+}
+
+// 刷新当前会话的情绪：先取一次基线，再轮询直到时间戳变化（说明新一轮分析已写回）
+const refreshSessionEmotion = async (sessionId) => {
+    stopEmotionPolling()
+    if (!sessionId) return
+
+    const id = String(sessionId).replace(/^session_/, '')
+    const baseline = await loadSessionEmotion(id)
+
+    let attempt = 0
+    const poll = async () => {
+        attempt += 1
+        const latest = await loadSessionEmotion(id)
+        if (latest && latest !== baseline) return
+        if (attempt < EMOTION_POLL_MAX) {
+            emotionPollTimer = setTimeout(poll, EMOTION_POLL_INTERVAL)
+        }
+    }
+    emotionPollTimer = setTimeout(poll, EMOTION_POLL_INTERVAL)
 }
 
 const getIntensityClass = (score) => {
@@ -374,7 +410,7 @@ const startNewSession = (message) => {
             currentSession.value = sessionData
        }
        // 更新会话列表
-       getSessionPage()
+       loadSessionList()
 
        // 添加初始用户消息
        messages.value.push({
@@ -400,6 +436,8 @@ const startAIResponse = (sessionId, userMessage) => {
 
     
     isAiTyping.value = true
+    // 标记本次流是否正常收到 done，用于避免 onclose 与 done 重复触发情绪刷新
+    let streamDone = false
 
     const aiMessage = {
         id: `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -437,9 +475,10 @@ const startAIResponse = (sessionId, userMessage) => {
 
             if (eventName === 'done') {
                 isAiTyping.value = false
+                streamDone = true
                 ctrl.abort()
-                // 进行情绪分析
-                loadSessionEmotion(currentSession.value.sessionId)
+                // 服务端的情绪分析是异步的，这里轮询等待新一轮结果写回
+                refreshSessionEmotion(currentSession.value.sessionId)
                 return
             }
             const payload = JSON.parse(raw)
@@ -456,8 +495,11 @@ const startAIResponse = (sessionId, userMessage) => {
             throw err
         },
         onclose: () => {
-            // 开始情绪分析
-            loadSessionEmotion(currentSession.value.sessionId)
+            // 正常收尾时 done 分支已经拉起轮询，这里只做兜底：
+            // 流被异常中断（未收到 done）时也要刷新一次情绪，避免结果永远不更新
+            if (!streamDone) {
+                refreshSessionEmotion(currentSession.value.sessionId)
+            }
         }
     })
 
@@ -474,8 +516,8 @@ const handleError = (error) => {
     ElMessage.error('AI回复失败，请重试')
 }
 
-const getSessionPage = () => {
-    getSessionList({
+const loadSessionList = () => {
+    getSessionPage({
         currentPage: 1,
         size: 10
     }).then(res => {
@@ -488,7 +530,7 @@ const getSessionPage = () => {
 // 获取会话数据
 const handleSessionClick = (session) => {
     // 点击会话时，获取会话详情
-    getSessionDetail(session.id).then(res => {
+    getSessionMessages(session.id).then(res => {
         messages.value = res
     }).catch(() => {
         // 失败提示已由拦截器统一处理
@@ -516,7 +558,7 @@ const handleDeleteSession = (sessionId) => {
         if (currentSession.value?.sessionId === `session_${sessionId}`) {
             createNewFrontendSession()
         }
-        getSessionPage()
+        loadSessionList()
     }).catch(() => {
         // 用户取消删除，无需处理
     })
@@ -630,9 +672,14 @@ const saveCurrentTitle = async () => {
 
 onMounted(() => {
     // 初始化时获取会话列表
-    getSessionPage()
+    loadSessionList()
     // 初始化时创建一个新会话
     createNewFrontendSession()
+})
+
+// 离开页面时清掉情绪轮询定时器，避免组件卸载后继续发请求
+onUnmounted(() => {
+    stopEmotionPolling()
 })
 </script>
 

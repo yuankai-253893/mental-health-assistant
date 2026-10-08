@@ -22,6 +22,10 @@ const frontendRoutes = [
         component: () => import('@/views/frontend/EmotionDiary.vue'),
       },
       {
+        path: 'favorites',
+        component: () => import('@/views/frontend/Favorites.vue'),
+      },
+      {
         path: 'knowledge',
         component: () => import('@/views/frontend/Knowledge.vue'),
       },
@@ -76,6 +80,22 @@ const backendRoutes = [
           title: '情绪日志',
           icon: 'User'
         }
+      },
+      {
+        path: 'users',
+        component: () => import('@/views/backend/Users.vue'),
+        meta: {
+          title: '用户管理',
+          icon: 'UserFilled'
+        }
+      },
+      {
+        path: 'logs',
+        component: () => import('@/views/backend/Logs.vue'),
+        meta: {
+          title: '操作日志',
+          icon: 'Document'
+        }
       }
     ]
   },
@@ -110,16 +130,45 @@ const router = createRouter({
   routes: [...backendRoutes, ...frontendRoutes],     // 路由配置
 })
 
+// localStorage 里的 userInfo 可能不存在或不是合法 JSON，解析失败时返回 null
+const parseStoredUserInfo = () => {
+  try {
+    return JSON.parse(localStorage.getItem('userInfo')) || null
+  } catch (e) {
+    return null
+  }
+}
+
+/**
+ * 登录态自愈：token 还在有效期内、但本地 userInfo 丢了（清缓存、换浏览器、隐私模式），
+ * 此时从服务端把用户信息拉回来，否则「token && userInfo」的判定会把有效登录态误判为未登录。
+ */
+const restoreUserInfo = async () => {
+  try {
+    // 动态 import 打断 router ←→ utils/request 的静态循环依赖（request.js 里 import 了 router）
+    const { getCurrentUser } = await import('@/api/user')
+    const userInfo = await getCurrentUser()
+    if (userInfo) {
+      localStorage.setItem('userInfo', JSON.stringify(userInfo))
+    }
+    return userInfo || null
+  } catch (e) {
+    // 拉不到说明 token 确实失效了：响应拦截器已清理凭证并跳登录页，这里清掉残留 token
+    localStorage.removeItem('token')
+    return null
+  }
+}
+
 // 路由前置守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   // 检查是否有token
   const token = localStorage.getItem('token')
-  // userInfo 可能不存在或不是合法 JSON，直接 JSON.parse 会抛错并中断导航
-  let userInfo = null
-  try {
-    userInfo = JSON.parse(localStorage.getItem('userInfo'))
-  } catch (e) {
-    userInfo = null
+
+  let userInfo = parseStoredUserInfo()
+
+  // token 有效但 userInfo 丢失时先自愈；登录页无需自愈，避免多打一次请求
+  if (token && !userInfo && !to.path.startsWith('/auth')) {
+    userInfo = await restoreUserInfo()
   }
 
   // token 与 userInfo 同时存在才算已登录

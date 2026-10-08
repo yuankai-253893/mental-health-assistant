@@ -37,6 +37,10 @@ public class PsychologicalChatController {
     private static final int BUFFER_MAX_SIZE = 8;
     private static final Duration BUFFER_FLUSH_INTERVAL = Duration.ofMillis(30);
 
+    // 消息列表默认返回条数 / 单次请求上限（防止超长会话把整段对话一次性读进内存）
+    private static final int DEFAULT_MESSAGE_LIMIT = 50;
+    private static final int MAX_MESSAGE_LIMIT = 200;
+
     @Autowired
     private PsychologicalSupportService psychologicalSupportService;
 
@@ -46,9 +50,9 @@ public class PsychologicalChatController {
     @Autowired
     private ConsultationMessageService consultationMessageService;
 
-    // 开始会话
+    // 开始会话（REST 语义：POST /sessions 创建一条会话资源）
     @OperationLog("开启咨询会话")
-    @PostMapping("/session/start")
+    @PostMapping("/sessions")
     public Result<StructOutPut.StreamChatSession> startSession(@Valid @RequestBody ConsultationSessionCreateDTO createDTO) {
         Long userId = GetUserInfo.getUserId();
 
@@ -112,9 +116,10 @@ public class PsychologicalChatController {
         return Result.success(sessionPage);
     }
 
-    // 查询会话消息
+    // 查询会话消息（默认只返回最近 50 条、最多 200 条，按时间升序）
     @GetMapping("/sessions/{sessionId}/messages")
-    public Result<List<ConsultationMessageResponseDTO>> getMessages(@PathVariable Long sessionId) {
+    public Result<List<ConsultationMessageResponseDTO>> getMessages(@PathVariable Long sessionId,
+                                                                   @RequestParam(defaultValue = "50") Integer limit) {
         Long userId = GetUserInfo.getUserId();
         Integer roleType = GetUserInfo.getUserType();
 
@@ -126,8 +131,12 @@ public class PsychologicalChatController {
             }
         }
         // 管理员：不做归属校验，可查看所有会话消息
-        
-        List<ConsultationMessageResponseDTO> messages = consultationMessageService.getMessagesBySessionId(sessionId);
+
+        // 兜底并夹紧 limit：避免传入 0 / 负数 / 超大值（超大值会把整段会话读进内存）
+        int safeLimit = (limit == null || limit < 1) ? DEFAULT_MESSAGE_LIMIT : Math.min(limit, MAX_MESSAGE_LIMIT);
+
+        List<ConsultationMessageResponseDTO> messages =
+                consultationMessageService.getMessagesBySessionId(sessionId, safeLimit);
         return Result.success(messages);
     }
 
@@ -172,7 +181,7 @@ public class PsychologicalChatController {
     }
 
     // 获取会话情绪分析结果
-    @GetMapping("/session/{sessionId}/emotion")
+    @GetMapping("/sessions/{sessionId}/emotion")
     public Result<EmotionAnalysisResponseDTO> getEmotionAnalysis(@PathVariable Long sessionId) {
         Long userId = GetUserInfo.getUserId();
         Integer roleType = GetUserInfo.getUserType();

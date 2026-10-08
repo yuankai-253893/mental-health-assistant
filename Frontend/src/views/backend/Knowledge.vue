@@ -52,7 +52,7 @@
 import { onMounted, ref, reactive } from 'vue'
 import PageHead from '@/components/backend/PageHead.vue'
 import TableSearch from '@/components/backend/TableSearch.vue'
-import { categoryTree, articlePage, getArticleDetail, changeArticleStatus, deleteArticle } from '@/api/admin'
+import { getCategoryTree, getAdminArticlePage, getArticleDetail, changeArticleStatus, deleteArticle } from '@/api/knowledge'
 import ArticleDialog from '@/components/backend/ArticleDialog.vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
@@ -61,7 +61,8 @@ import { formatDateTime } from '@/utils/format'
 const formItem = ref([
     { comp: 'input', prop: 'title', label: '文章标题', placeholder: '请输入文章标题' },
     { comp: 'select', prop: 'categoryId', label: '分类', placeholder: '请选择分类', options: [] },
-    { comp: 'select', prop: 'status', label: '状态', placeholder: '请输入文章内容', options: [{
+    {
+        comp: 'select', prop: 'status', label: '状态', placeholder: '请输入文章内容', options: [{
        label: '草稿',
        value: '0'
     },{
@@ -70,7 +71,9 @@ const formItem = ref([
     },{
        label: '已下线',
        value: '2'
-    }] }
+    }] },
+    // 后端做的是「用户名 → 作者ID → 精确匹配」，因此需要输入完整用户名，不支持模糊
+    { comp: 'input', prop: 'authorName', label: '作者用户名', placeholder: '请输入完整用户名（精确匹配）' }
 ])
 
 // 分页参数
@@ -94,7 +97,7 @@ const handleSearch = async (formData = lastSearchForm, resetPage = true) => {
     }
 
     try {
-        const { records, total } = await articlePage(params)
+        const { records, total } = await getAdminArticlePage(params)
         tableData.value = records
         pagination.total = total
     } catch (e) {
@@ -204,7 +207,7 @@ const handleDelete = (row) => {
 onMounted(async () => {
     // 分类加载失败不应阻塞列表请求
     try {
-        const data = await categoryTree()
+        const data = await getCategoryTree()
 
         categories.value = data.map(item => {
             categoryMap[item.id] = item.categoryName

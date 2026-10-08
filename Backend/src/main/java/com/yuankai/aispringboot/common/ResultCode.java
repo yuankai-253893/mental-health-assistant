@@ -26,6 +26,10 @@ public enum ResultCode {
     USER_NOT_EXIST("6002", "用户不存在"),
     SESSION_NOT_FOUND("6003", "会话不存在"),
     EMOTIONDIARY_NOT_FOUND("6004", "情感日记不存在"),
+    ARTICLE_NOT_FOUND("6005", "文章不存在"),
+    ANALYSIS_TASK_NOT_FOUND("6006", "分析任务不存在"),
+    ANALYSIS_TASK_DUPLICATE("6007", "该日记已有分析任务正在处理中"),
+    ANALYSIS_TASK_NOT_RETRYABLE("6008", "该任务当前状态不可重试"),
 
     // token相关错误
     TOKEN_INVALID("A0230", "token无效"),

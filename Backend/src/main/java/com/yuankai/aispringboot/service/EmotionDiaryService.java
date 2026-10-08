@@ -36,6 +36,9 @@ public class EmotionDiaryService {
     @Autowired
     private ActiveUserRecordService activeUserRecordService;
 
+    @Autowired
+    private AiAnalysisTaskService aiAnalysisTaskService;
+
     public EmotionDiaryResponseDTO createOrUpdateEmotionDiary(Long userId, EmotionDiaryCreateDTO dto) {
         if (dto.getDiaryDate().isAfter(LocalDate.now())) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "日记日期不能晚于今天");
@@ -62,6 +65,16 @@ public class EmotionDiaryService {
         queryWrapper.eq(EmotionDiary::getUserId, userId)
                 .eq(EmotionDiary::getDiaryDate, dto.getDiaryDate());
         EmotionDiary saved = emotionDiaryMapper.selectOne(queryWrapper);
+
+        // 保存后自动触发 AI 情绪分析：先入队，再由本类（跨 Bean）派发异步执行，
+        // @Async 只有跨 Bean 调用才生效；模型调用失败不会影响日记保存
+        if (saved != null) {
+            Long taskId = aiAnalysisTaskService.triggerAutoAnalysis(saved.getId(), userId);
+            if (taskId != null) {
+                aiAnalysisTaskService.executeTask(taskId);
+            }
+        }
+
         return convertToResponseDTO(saved);
     }
 
@@ -76,7 +89,7 @@ public class EmotionDiaryService {
 
     public Page<EmotionDiaryResponseDTO> getEmotionDiaryByPage(EmotionDiaryQueryDTO queryDTO) {
         // 构建分页对象
-        Page<EmotionDiary> page = new Page<>(queryDTO.getCurrent(), queryDTO.getSize());
+        Page<EmotionDiary> page = new Page<>(queryDTO.getCurrentPage(), queryDTO.getSize());
 
         // 构建查询条件
         LambdaQueryWrapper<EmotionDiary> queryWrapper = new LambdaQueryWrapper<>();

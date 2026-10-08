@@ -5,9 +5,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yuankai.aispringboot.DTO.SessionMessageStatDTO;
 import com.yuankai.aispringboot.DTO.command.ConsultationSessionCreateDTO;
 import com.yuankai.aispringboot.DTO.query.ConsultationSessionQueryDTO;
-import com.yuankai.aispringboot.DTO.response.ConsultationMessageResponseDTO;
 import com.yuankai.aispringboot.DTO.response.ConsultationSessionResponseDTO;
 import com.yuankai.aispringboot.DTO.response.EmotionAnalysisResponseDTO;
 import com.yuankai.aispringboot.common.ResultCode;
@@ -42,9 +42,6 @@ public class ConsultationSessionService {
 
     @Autowired
     private ConsultationMessageMapper consultationMessageMapper;
-
-    @Autowired
-    private ConsultationMessageService consultationMessageService;
 
     public ConsultationSession createSession (Long userId, ConsultationSessionCreateDTO createDTO){
         // 验证用户是否存在
@@ -122,37 +119,78 @@ public class ConsultationSessionService {
 
         // 执行分页查询
         Page<ConsultationSession> sessionPage = consultationSessionMapper.selectPage(page, queryWrapper);
-        // 转换为响应DTO（顺带批量补全会话所属用户名，管理员查看全部时便于区分归属）
+        // 转换为响应DTO（批量补全用户名、消息数、最后一条消息，便于列表展示）
         return convertToResponsePage(sessionPage);
     }
 
-    // Page 转换：逐条转 DTO 后统一回填用户名
+    // Page 转换：批量补齐列表展示需要的关联数据（用户名、消息数、最后一条消息），
+    // 全部走批量查询——原实现把「查消息数」和「查最后一条消息」放在逐条转换里，
+    // 一页 10 条会话会打出 1 + 2×10 次 SQL，现在是 1（分页）+ 3（批量）次，与页大小无关
     private Page<ConsultationSessionResponseDTO> convertToResponsePage(Page<ConsultationSession> sessionPage) {
-        if (sessionPage.getRecords().isEmpty()) {
-            return new Page<>(sessionPage.getCurrent(), sessionPage.getSize(), sessionPage.getTotal());
+        Page<ConsultationSessionResponseDTO> responsePage =
+                new Page<>(sessionPage.getCurrent(), sessionPage.getSize(), sessionPage.getTotal());
+
+        List<ConsultationSession> sessions = sessionPage.getRecords();
+        if (sessions.isEmpty()) {
+            return responsePage;
         }
 
-        List<ConsultationSessionResponseDTO> records = sessionPage.getRecords().stream()
+        List<Long> sessionIds = sessions.stream().map(ConsultationSession::getId).toList();
+
+        // 1) 一次 GROUP BY 拿到每条会话的消息数与最后一条消息 id
+        List<SessionMessageStatDTO> stats = consultationMessageMapper.selectMessageStats(sessionIds);
+        Map<Long, SessionMessageStatDTO> statMap = stats.stream()
+                .collect(Collectors.toMap(SessionMessageStatDTO::getSessionId, s -> s, (a, b) -> a));
+
+        // 2) 一次 selectBatchIds 把「最后一条消息」的正文取回来，供列表做内容预览
+        // 这里用 MAX(id) 定位最后一条，而不是按 created_at 排序：
+        // 用户消息与 AI 回复常在同一秒内落库，按秒级时间戳排序可能取到用户那条
+        Set<Long> lastMessageIds = stats.stream()
+                .map(SessionMessageStatDTO::getLastMessageId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, ConsultationMessage> lastMessageMap = lastMessageIds.isEmpty()
+                ? Map.of()
+                : consultationMessageMapper.selectBatchIds(lastMessageIds).stream()
+                        .collect(Collectors.toMap(ConsultationMessage::getId, m -> m, (a, b) -> a));
+
+        // 3) 一次批量查询涉及到的用户，避免逐条查库
+        Set<Long> userIds = sessions.stream()
+                .map(ConsultationSession::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> usernameMap = userIds.isEmpty()
+                ? Map.of()
+                : userMapper.selectByIds(userIds).stream()
+                        .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
+
+        List<ConsultationSessionResponseDTO> records = sessions.stream()
                 .map(this::convertToResponseDTO)
                 .toList();
 
-        // 批量查询涉及到的用户，避免逐条查库
-        Set<Long> userIds = records.stream()
-                .map(ConsultationSessionResponseDTO::getUserId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (!userIds.isEmpty()) {
-            Map<Long, String> usernameMap = userMapper.selectByIds(userIds).stream()
-                    .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
-            records.forEach(dto -> dto.setUsername(usernameMap.get(dto.getUserId())));
+        // 4) 把批量查到的关联数据回填到对应 DTO
+        for (ConsultationSessionResponseDTO dto : records) {
+            dto.setUsername(usernameMap.get(dto.getUserId()));
+
+            SessionMessageStatDTO stat = statMap.get(dto.getId());
+            if (stat == null) {
+                // 该会话还没有任何消息，保持默认的 0 条与空预览
+                continue;
+            }
+            dto.setMessageCount(stat.getMessageCount() == null ? 0 : stat.getMessageCount());
+
+            ConsultationMessage lastMessage = lastMessageMap.get(stat.getLastMessageId());
+            if (lastMessage != null) {
+                dto.setLastMessageContent(lastMessage.getContent());
+                dto.setLastMessageTime(lastMessage.getCreatedAt());
+            }
         }
 
-        Page<ConsultationSessionResponseDTO> responsePage =
-                new Page<>(sessionPage.getCurrent(), sessionPage.getSize(), sessionPage.getTotal());
         responsePage.setRecords(records);
         return responsePage;
     }
 
+    // 实体 → DTO：只做字段拷贝，不查库；关联数据统一由 convertToResponsePage 批量回填
     private ConsultationSessionResponseDTO convertToResponseDTO(ConsultationSession session) {
         ConsultationSessionResponseDTO responseDTO = new ConsultationSessionResponseDTO();
         responseDTO.setId(session.getId());
@@ -161,20 +199,8 @@ public class ConsultationSessionService {
         responseDTO.setStartedAt(session.getStartedAt());
         responseDTO.setLastEmotionAnalysis(session.getLastEmotionAnalysis());
         responseDTO.setLastEmotionUpdatedAt(session.getLastEmotionUpdatedAt());
-
-        // 查询该会话的消息数量
-        LambdaQueryWrapper<ConsultationMessage> countWrapper = new LambdaQueryWrapper<>();
-        countWrapper.eq(ConsultationMessage::getSessionId, session.getId());
-        Long messageCount = consultationMessageMapper.selectCount(countWrapper);
-        responseDTO.setMessageCount(messageCount.intValue());
-
-        // 补充最后一条消息，用于列表展示会话预览与最近时间
-        ConsultationMessageResponseDTO lastMessage = consultationMessageService.getLastMessageBySessionId(session.getId());
-        if (lastMessage != null) {
-            responseDTO.setLastMessageContent(lastMessage.getContent());
-            responseDTO.setLastMessageTime(lastMessage.getCreatedAt());
-        }
-
+        // 消息数默认 0，有消息时由 convertToResponsePage 覆盖
+        responseDTO.setMessageCount(0);
         return responseDTO;
     }
 

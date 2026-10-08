@@ -24,4 +24,15 @@ public class ChatClientConfig {
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory()).build())
                 .defaultSystem("你是一个专业的心理疏导师，温和耐心，善于倾听，能够提供专业的心理支持和建议").build();
     }
+
+    /**
+     * 情绪分析专用 ChatClient：刻意不挂会话记忆顾问。
+     * 分析任务针对某一条独立日记，与咨询对话的上下文无关；
+     * 若复用带记忆的 bean，会把无关的对话历史带进分析请求，污染结果并白白消耗 token。
+     * 系统提示词在调用处按分析场景单独传入。
+     */
+    @Bean("analysis-ai")
+    public ChatClient analysisChatClient(OpenAiChatModel openAiChatModel) {
+        return ChatClient.builder(openAiChatModel).build();
+    }
 }

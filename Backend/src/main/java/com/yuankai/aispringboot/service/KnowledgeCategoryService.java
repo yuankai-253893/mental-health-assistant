@@ -63,6 +63,9 @@ public class KnowledgeCategoryService {
     @Autowired
     private KnowledgeCategoryConvert knowledgeCategoryConvert;
 
+    @Autowired
+    private SysFileInfoService sysFileInfoService;
+
     public List<CategoryResponseDTO> getCategoryTree() {
         // 1. 缓存优先：命中直接返回，避免每次全表查询（Cache Aside 读路径）
         try {
@@ -124,11 +127,11 @@ public class KnowledgeCategoryService {
         return tree;
     }
 
-//    // 主动失效：分类发生增删改后调用，删除缓存让下次查询重建（Cache Aside 写路径）
-//    public void clearCategoryTreeCache() {
-//        redisTemplate.delete(RedisKeyConsts.CATEGORY_TREE_KEY);
-//        log.info("分类树缓存已清除");
-//    }
+    // 说明：分类树只有 Cache Aside 的「读路径」，没有「写路径」（主动删缓存）。
+    // 因为分类表目前只暴露了查询接口（GET /knowledge/category/tree），
+    // 增删改由数据库初始化脚本维护，不存在「改了分类要立刻让缓存失效」的场景，
+    // 靠 CATEGORY_TREE_TTL_HOURS 的 TTL 兜底已足够。
+    // redisTemplate.delete(RedisKeyConsts.CATEGORY_TREE_KEY);
 
     // 管理员端分页查询文章
     public Page<ArticleSimpleResponseDTO> getArticleByPage(ArticleListQueryDTO queryDTO) {
@@ -313,9 +316,13 @@ public class KnowledgeCategoryService {
         }
 
         // 更新文章信息
+        // 先记下旧封面：更新成功后要把它对应的物理文件清理掉，否则磁盘只增不减
+        String oldCover = knowledgeArticle.getCover();
+        String newCover = articleDTO.getCoverImage();
+
         knowledgeArticle.setTitle(articleDTO.getTitle());
         knowledgeArticle.setContent(articleDTO.getContent());
-        knowledgeArticle.setCover(articleDTO.getCoverImage());
+        knowledgeArticle.setCover(newCover);
         knowledgeArticle.setCategoryId(articleDTO.getCategoryId());
         knowledgeArticle.setSummary(articleDTO.getSummary());
         knowledgeArticle.setTags(articleDTO.getTags());
@@ -323,6 +330,12 @@ public class KnowledgeCategoryService {
 
         // 将新的文章信息更新到数据库
         knowledgeArticleMapper.updateById(knowledgeArticle);
+
+        // 封面被替换或清空后清理旧文件。放在写库之后：此时旧 URL 已确定不再被引用，
+        // 即使删文件失败也只留下一个孤儿文件，不会破坏文章数据。
+        if (StrUtil.isNotBlank(oldCover) && !oldCover.equals(newCover)) {
+            sysFileInfoService.deleteByUrlQuietly(oldCover);
+        }
 
         ArticleResponseDTO result = knowledgeCategoryConvert.convertToResponseDTO(knowledgeArticle);
 
@@ -360,6 +373,9 @@ public class KnowledgeCategoryService {
             throw new BusinessException("该文章不存在");
         }
         knowledgeArticleMapper.deleteById(id);
+
+        // 文章没了，封面文件也一并清理，否则会永远留在 upload 目录里
+        sysFileInfoService.deleteByUrlQuietly(knowledgeArticle.getCover());
     }
 
 }

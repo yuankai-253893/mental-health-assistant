@@ -5,6 +5,7 @@ import com.yuankai.aispringboot.DTO.command.ConsultationSessionCreateDTO;
 import com.yuankai.aispringboot.DTO.response.ConsultationMessageResponseDTO;
 import com.yuankai.aispringboot.entity.ConsultationSession;
 import com.yuankai.aispringboot.service.ActiveUserRecordService;
+import com.yuankai.aispringboot.service.ConsultationEmotionService;
 import com.yuankai.aispringboot.service.ConsultationMessageService;
 import com.yuankai.aispringboot.service.ConsultationSessionService;
 import org.springframework.ai.chat.client.ChatClient;
@@ -39,6 +40,9 @@ public class PsychologicalSupportService {
 
     @Autowired
     private ActiveUserRecordService activeUserRecordService;
+
+    @Autowired
+    private ConsultationEmotionService consultationEmotionService;
 
     public StructOutPut.StreamChatSession startSession(Long userId, ConsultationSessionCreateDTO createDTO) {
         // 创建数据库的会话记录，向数据库插入一条会话记录
@@ -120,7 +124,11 @@ public class PsychologicalSupportService {
                         aiMessages.add(new AssistantMessage(completeRes));
                         chatMemory.add(conversationId, aiMessages);
 
+                        // 先放行完成信号，再异步做情绪分析：
+                        // done 事件负责收起前端的「AI 正在输入」，不能被第二次模型调用拖住。
+                        // 情绪分析写回后由前端按间隔回查（异步方法必须是跨 Bean 调用才走代理）。
                         sink.complete();
+                        consultationEmotionService.analyzeAndSaveAsync(dbSessionId);
                     })
                     .doOnError(error -> {
                         sink.error(error);

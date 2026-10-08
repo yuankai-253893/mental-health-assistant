@@ -12,6 +12,7 @@
                     <router-link to="/" class="nav-link">首页</router-link>
                     <router-link to="/consultation" class="nav-link" v-if="isLoggedIn">AI咨询</router-link>
                     <router-link to="/emotion-diary" class="nav-link" v-if="isLoggedIn">情绪日记</router-link>
+                    <router-link to="/favorites" class="nav-link" v-if="isLoggedIn">我的收藏</router-link>
                     <router-link to="/knowledge" class="nav-link">知识库</router-link>
                     <el-button v-if="isLoggedIn" class="logout-btn" @click="handleLogout">退出登录</el-button>
                     <template v-else>
@@ -36,6 +37,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { logout } from '@/api/auth'
+import { ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import iconUrl from '@/assets/images/机器人.png'
 
@@ -43,16 +45,24 @@ const router = useRouter()
 
 const isLoggedIn = ref(false)
 
-// 登出
+// 登出：二次确认后再执行，避免紧邻导航链接的按钮被误点
 const handleLogout = () => {
-    logout().catch(() => {
-        // 退出接口失败（如 token 已失效）不应阻塞登出
-    }).finally(() => {
-        // 无论接口成功与否都清理本地登录态
-        localStorage.removeItem('token')
-        localStorage.removeItem('userInfo')
-        // 跳转到登录页
-        router.push('/auth/login')
+    ElMessageBox.confirm('确定退出登录吗？', '退出确认', {
+        confirmButtonText: '确定退出',
+        cancelButtonText: '取消',
+        type: 'warning'
+    }).then(() => {
+        logout().catch(() => {
+            // 退出接口失败（如 token 已失效）不应阻塞登出
+        }).finally(() => {
+            // 无论接口成功与否都清理本地登录态
+            localStorage.removeItem('token')
+            localStorage.removeItem('userInfo')
+            // 跳转到登录页
+            router.push('/auth/login')
+        })
+    }).catch(() => {
+        // 用户取消退出，无需处理
     })
 }
 
@@ -65,6 +75,13 @@ onMounted(() => {
 <style scoped lang="scss">
 .frontend-layout {
     background-color: #fff;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+
+    .main-content {
+        flex: 1;
+    }
 
     /* 顶部导航固定：sticky 相对视口吸顶，父级 .frontend-layout 高度随内容撑开，
        所以能一直吸在顶部；z-index 保持在 Element Plus 弹层（2000+）之下 */

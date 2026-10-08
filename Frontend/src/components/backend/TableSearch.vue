@@ -4,7 +4,11 @@
             <template v-for="item in formItemAttrs" :key="item.prop">
                 <el-col v-bind="item.col">
                     <el-form-item :label="item.label" :prop="item.prop">
-                        <component v-model="formData[item.prop]" :is="isComp(item.comp)" :placeholder="item.placeholder">
+                        <component
+                            v-model="formData[item.prop]"
+                            :is="isComp(item.comp)"
+                            :placeholder="item.placeholder"
+                            v-bind="item.attrs || {}">
                             <template v-if="item.comp === 'select'">
                                 <el-option label="全部" value="" />
                                 <el-option
@@ -50,7 +54,9 @@ const formData = reactive({})
 const isComp = (comp) => {
     return {
         input: 'elInput',
-        select: 'elSelect'
+        select: 'elSelect',
+        // 日期区间：具体行为（type / valueFormat / 占位文案）由调用方通过 attrs 传入
+        daterange: 'elDatePicker'
     }[comp]
 }
 

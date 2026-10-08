@@ -36,6 +36,18 @@
                         <el-icon><Platform /></el-icon>
                         <span>{{ articleDetail.readCount }} 次阅读</span>
                     </div>
+                    <!-- 收藏按钮：未登录时点击引导去登录 -->
+                    <el-button
+                        class="favorite-btn"
+                        :type="isFavorited ? 'warning' : 'default'"
+                        :loading="favoriteLoading"
+                        @click="toggleFavorite">
+                        <el-icon>
+                            <StarFilled v-if="isFavorited" />
+                            <Star v-else />
+                        </el-icon>
+                        <span>{{ isFavorited ? '已收藏' : '收藏' }}</span>
+                    </el-button>
                 </div>
             </div>
             <div class="diary-card">
@@ -56,9 +68,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getKnowledgeDetail, getKnowledgeCategoryTree } from '@/api/user'
-import { dayjs } from 'element-plus'
-import { Avatar, ArrowLeft } from '@element-plus/icons-vue'
+import { getArticleDetail, getCategoryTree } from '@/api/knowledge'
+import { checkFavorite, addFavorite, removeFavorite } from '@/api/user'
+import { dayjs, ElMessage, ElMessageBox } from 'element-plus'
+import { Avatar, ArrowLeft, Star, StarFilled } from '@element-plus/icons-vue'
 import iconUrl from '@/assets/images/book.png'
 
 const props = defineProps({
@@ -70,6 +83,63 @@ const router = useRouter()
 // 返回知识库列表
 const goBackToList = () => {
     router.push('/knowledge')
+}
+
+// ==================== 收藏 ====================
+
+const isFavorited = ref(false)
+const favoriteLoading = ref(false)
+
+// 文章详情对未登录用户开放，收藏状态接口需要 token，未登录时不去请求（否则会被拦截器跳转到登录页）
+const isLoggedIn = () => !!localStorage.getItem('token')
+
+const loadFavoriteState = () => {
+    if (!isLoggedIn()) return
+    checkFavorite(props.id).then(res => {
+        isFavorited.value = res === true
+    }).catch(() => {
+        // 收藏状态拉取失败不影响文章阅读，静默处理
+    })
+}
+
+const toggleFavorite = async () => {
+    if (!isLoggedIn()) {
+        ElMessage.warning('请先登录后再收藏')
+        router.push('/auth/login')
+        return
+    }
+    if (favoriteLoading.value) return
+
+    // 取消收藏属于删除类操作，先二次确认；收藏无需确认
+    if (isFavorited.value) {
+        try {
+            await ElMessageBox.confirm('确定要取消收藏这篇文章吗？', '取消收藏', {
+                confirmButtonText: '确定取消',
+                cancelButtonText: '再想想',
+                type: 'warning'
+            })
+        } catch (e) {
+            // 用户取消，保持已收藏状态
+            return
+        }
+    }
+
+    favoriteLoading.value = true
+    try {
+        if (isFavorited.value) {
+            await removeFavorite(props.id)
+            isFavorited.value = false
+            ElMessage.success('已取消收藏')
+        } else {
+            await addFavorite(props.id)
+            isFavorited.value = true
+            ElMessage.success('收藏成功')
+        }
+    } catch (e) {
+        // 失败提示已由 request.js 拦截器统一弹出
+    } finally {
+        favoriteLoading.value = false
+    }
 }
 
 const articleDetail = ref({})
@@ -88,7 +158,7 @@ const tagList = computed(() => {
 })
 
 const loadCategoryMap = () => {
-    getKnowledgeCategoryTree().then(res => {
+    getCategoryTree().then(res => {
         const map = {}
         const walk = (list) => {
             (list || []).forEach(item => {
@@ -119,7 +189,8 @@ const formatContent = (content) => {
 
 onMounted(() => {
     loadCategoryMap()
-    getKnowledgeDetail(props.id).then(res => {
+    loadFavoriteState()
+    getArticleDetail(props.id).then(res => {
         articleDetail.value = res
     }).catch(() => {
         // 失败提示已由 request.js 拦截器统一弹出，这里只需要展示空状态
@@ -138,6 +209,13 @@ onMounted(() => {
             margin-right: 20px;
             span {
                 margin-left: 5px;
+            }
+        }
+        /* 收藏按钮推到行尾，与作者/阅读量拉开距离 */
+        .favorite-btn {
+            margin-left: auto;
+            span {
+                margin-left: 4px;
             }
         }
     }

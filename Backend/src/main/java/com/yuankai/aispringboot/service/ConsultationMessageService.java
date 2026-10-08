@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -53,23 +55,29 @@ public class ConsultationMessageService {
     }
 
     // 根据会话ID获取最后一条消息，用于获取会话的最新状态
+    // 按 id 倒序而不是 created_at：用户消息与 AI 回复常在同一秒内落库，按秒级时间戳会取错
     public ConsultationMessageResponseDTO getLastMessageBySessionId(Long sessionId) {
         LambdaQueryWrapper<ConsultationMessage> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ConsultationMessage::getSessionId, sessionId)
-                .orderByDesc(ConsultationMessage::getCreatedAt)
+                .orderByDesc(ConsultationMessage::getId)
                 .last("limit 1");
 
         ConsultationMessage lastMessage = consultationMessageMapper.selectOne(queryWrapper);
         return lastMessage != null ? convertToResponseDTO(lastMessage) : null;
     }
 
-    // 根据会话ID获取消息列表，按时间升序排列
-    public List<ConsultationMessageResponseDTO> getMessagesBySessionId(Long sessionId) {
+    // 根据会话ID获取消息列表，按时间升序返回，最多返回最近 limit 条
+    // 先按 id 倒序取最近 limit 条再反转：会话消息可能很长，全量 selectList 会把整段对话读进内存；
+    // 用 id 而不是 created_at 排序，避免同一秒内插入的多条消息顺序错乱
+    public List<ConsultationMessageResponseDTO> getMessagesBySessionId(Long sessionId, int limit) {
         LambdaQueryWrapper<ConsultationMessage> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ConsultationMessage::getSessionId, sessionId)
-                .orderByAsc(ConsultationMessage::getCreatedAt);
+                .orderByDesc(ConsultationMessage::getId)
+                .last("limit " + limit);
 
-        List<ConsultationMessage> messages = consultationMessageMapper.selectList(queryWrapper);
+        List<ConsultationMessage> messages =
+                new ArrayList<>(consultationMessageMapper.selectList(queryWrapper));
+        Collections.reverse(messages);
         return messages.stream().map(this::convertToResponseDTO).toList();
     }
 
@@ -88,13 +96,6 @@ public class ConsultationMessageService {
         responseDTO.setEmotionTag(message.getEmotionTag());
         responseDTO.setAiModel(message.getAiModel());
         responseDTO.setCreatedAt(message.getCreatedAt());
-
-        // 设置描述字段（通过实体方法获取）
-        responseDTO.setSenderTypeDesc(message.getSenderTypeDesc());
-        responseDTO.setMessageTypeDesc(message.getMessageTypeDesc());
-
-        // 计算消息长度
-        responseDTO.setContentLength(message.getContent() != null ? message.getContent().length() : 0);
 
         return responseDTO;
     }

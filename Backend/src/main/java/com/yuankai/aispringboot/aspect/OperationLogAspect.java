@@ -54,9 +54,9 @@ public class OperationLogAspect {
 
     private static final int MAX_PARAM_LENGTH = 1000;
     private static final int MAX_ERROR_LENGTH = 500;
-    /** 敏感字段脱敏：password / confirmPassword 的值替换为 *** */
+    /** 敏感字段脱敏：password / confirmPassword / newPassword / oldPassword 的值替换为 *** */
     private static final Pattern SENSITIVE_PATTERN =
-            Pattern.compile("(\"(password|confirmPassword)\"\\s*:\\s*\")[^\"]*(\")");
+            Pattern.compile("(\"(password|confirmPassword|newPassword|oldPassword)\"\\s*:\\s*\")[^\"]*(\")");
 
     @Resource
     private OperationLogMapper operationLogMapper;

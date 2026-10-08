@@ -67,7 +67,8 @@
 <script setup>
 import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { uploadFile, createArticle, updateArticle } from '@/api/admin'
+import { uploadFile, deleteFile } from '@/api/admin'
+import { createArticle, updateArticle } from '@/api/knowledge'
 import { fileBaseUrl } from '@/config/index.js'
 import RichTextEditor from '@/components/backend/RichTextEditor.vue'
 
@@ -120,6 +121,9 @@ watch(() => props.article, (newVal) => {
 })
 
 const handleClose = () => {
+    // 先清理「本次编辑会话里上传、但从未保存」的封面，再重置表单
+    // （必须在 resetFields 之前调用，否则 formData.coverImage 已被清空，无从判断）
+    cleanupUnsavedCover()
     // 重置表单
     formRef.value.resetFields()
     // 重置ID
@@ -180,6 +184,26 @@ const beforeUpload = (file) => {
     return true
 }
 const businessId = ref(null)
+
+/**
+ * 清理「本次编辑会话里上传、但从未保存」的封面文件，避免磁盘上堆积孤儿图片。
+ *
+ * 判定规则：当前封面既非空、又不等于文章已保存的封面（props.article.cover），
+ * 说明它是本次操作新传的、还没落库，可以安全删除。
+ * 绝不删 props.article.cover —— 那是线上正在引用的封面，只能由后端在
+ * 「保存文章（换封面）」或「删除文章」时清理；否则用户传了新图再点取消，
+ * 就会把线上封面删掉，文章直接裂图。
+ */
+const cleanupUnsavedCover = async () => {
+    const current = formData.coverImage
+    if (!current || current === props.article?.cover) return
+    try {
+        await deleteFile(current)
+    } catch (e) {
+        // 清理失败只会留下一个孤儿文件，不影响用户操作，无需打扰用户
+    }
+}
+
 const handleUploadRequest = async ({ file }) => {
     // UUID生成
     businessId.value = crypto.randomUUID()
@@ -191,6 +215,9 @@ const handleUploadRequest = async ({ file }) => {
             businessField: 'cover'
         })
 
+        // 新封面已经拿到，此时旧的「未保存上传件」确定不再被引用，可以安全清理
+        await cleanupUnsavedCover()
+
         // 拼接完整的图片地址
         imgUrl.value = fileBaseUrl + filePath
         formData.coverImage = filePath
@@ -200,6 +227,8 @@ const handleUploadRequest = async ({ file }) => {
 }
 
 const handleRemove = () => {
+    // 只清未保存的上传件；已保存的封面交给后端在保存/删除文章时清理
+    cleanupUnsavedCover()
     imgUrl.value = ''
     formData.coverImage = ''
 }
