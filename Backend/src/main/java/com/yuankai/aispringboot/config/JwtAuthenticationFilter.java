@@ -5,6 +5,7 @@ import com.yuankai.aispringboot.entity.User;
 import com.yuankai.aispringboot.enumclass.UserType;
 import com.yuankai.aispringboot.mapper.UserMapper;
 import com.yuankai.aispringboot.service.RedisTokenBlacklist;
+import com.yuankai.aispringboot.service.TokenInvalidationService;
 import com.yuankai.aispringboot.util.JwtTokenUtil;
 import com.yuankai.aispringboot.util.ResponseUtil;
 import jakarta.annotation.Resource;
@@ -37,6 +38,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Resource
     private RedisTokenBlacklist redisTokenBlacklist;
+
+    @Resource
+    private TokenInvalidationService tokenInvalidationService;
 
     @Resource
     private UserMapper userMapper;
@@ -87,9 +91,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     return;
                 }
 
+                // 5、校验「改密即踢下线」：token 签发时间早于该用户最近一次密码变更 → 判定失效。
+                //    用户被重置密码后，改密前签发的 token 立刻不可用，无需等到自然过期。
+                if (tokenInvalidationService.isIssuedBeforePasswordChange(
+                        validationResult.getUserId(), validationResult.getIssuedAtSeconds())) {
+                    clearSecurityContext();
+                    ResponseUtil.writeError(response, ResultCode.TOKEN_PASSWORD_CHANGED);
+                    return;
+                }
+
                 log.debug("JWT验证通过, 用户: {}", validationResult.getUsername());
 
-                // 5、创建Spring Security认证对象（用户信息已校验，直接使用token携带的角色）
+                // 6、创建Spring Security认证对象（用户信息已校验，直接使用token携带的角色）
                 // 权限标识必须用枚举名（ROLE_ADMIN / ROLE_USER）而不是数字 code：
                 // @PreAuthorize("hasRole('ADMIN')") 匹配的是字符串 ROLE_ADMIN，
                 String roleName = resolveRoleName(validationResult.getRoleType());

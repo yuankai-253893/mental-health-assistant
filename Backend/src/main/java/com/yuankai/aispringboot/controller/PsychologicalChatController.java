@@ -9,7 +9,7 @@ import com.yuankai.aispringboot.DTO.command.ConsultationSessionCreateDTO;
 import com.yuankai.aispringboot.DTO.command.ConsultationSessionTitleUpdateDTO;
 import com.yuankai.aispringboot.DTO.command.ConsultationStreamDTO;
 import com.yuankai.aispringboot.DTO.query.ConsultationSessionQueryDTO;
-import com.yuankai.aispringboot.DTO.response.ConsultationMessageResponseDTO;
+import com.yuankai.aispringboot.DTO.response.ConsultationMessagePageDTO;
 import com.yuankai.aispringboot.DTO.response.ConsultationSessionResponseDTO;
 import com.yuankai.aispringboot.DTO.response.EmotionAnalysisResponseDTO;
 import com.yuankai.aispringboot.common.Result;
@@ -27,7 +27,6 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import java.time.Duration;
 import java.util.Map;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/psychological-chat")
@@ -116,10 +115,12 @@ public class PsychologicalChatController {
         return Result.success(sessionPage);
     }
 
-    // 查询会话消息（默认只返回最近 50 条、最多 200 条，按时间升序）
+    // 查询会话消息（游标式翻页：默认返回最近 50 条、最多 200 条，按时间升序）
+    // beforeId：上一批的第一条消息 id，用于向前加载更早的历史；不传则取最新一批
     @GetMapping("/sessions/{sessionId}/messages")
-    public Result<List<ConsultationMessageResponseDTO>> getMessages(@PathVariable Long sessionId,
-                                                                   @RequestParam(defaultValue = "50") Integer limit) {
+    public Result<ConsultationMessagePageDTO> getMessages(@PathVariable Long sessionId,
+                                                          @RequestParam(defaultValue = "50") Integer limit,
+                                                          @RequestParam(required = false) Long beforeId) {
         Long userId = GetUserInfo.getUserId();
         Integer roleType = GetUserInfo.getUserType();
 
@@ -135,8 +136,8 @@ public class PsychologicalChatController {
         // 兜底并夹紧 limit：避免传入 0 / 负数 / 超大值（超大值会把整段会话读进内存）
         int safeLimit = (limit == null || limit < 1) ? DEFAULT_MESSAGE_LIMIT : Math.min(limit, MAX_MESSAGE_LIMIT);
 
-        List<ConsultationMessageResponseDTO> messages =
-                consultationMessageService.getMessagesBySessionId(sessionId, safeLimit);
+        ConsultationMessagePageDTO messages =
+                consultationMessageService.getMessagesBySessionId(sessionId, safeLimit, beforeId);
         return Result.success(messages);
     }
 

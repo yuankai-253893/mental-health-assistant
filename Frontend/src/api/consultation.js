@@ -24,7 +24,10 @@ export const updateSessionTitle = (sessionId, sessionTitle) => {
     return service.put(`/psychological-chat/sessions/${sessionId}/title`, { sessionTitle })
 }
 
-// 查询会话消息（后端默认只返回最近 50 条、最多 200 条，按时间升序）
+// 查询会话消息（游标式翻页）
+// params: { limit }            取最新一批（默认 50，后端最多 200）
+//         { limit, beforeId }  向前加载更早的历史，beforeId 传上一批的第一条消息 id
+// 返回 { records: [...按时间升序], hasMore: 是否还有更早的消息 }
 export const getSessionMessages = (sessionId, params) => {
     return service.get(`/psychological-chat/sessions/${sessionId}/messages`, { params })
 }

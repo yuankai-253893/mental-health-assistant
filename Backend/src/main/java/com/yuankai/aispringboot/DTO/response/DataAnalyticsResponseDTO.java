@@ -1,16 +1,24 @@
 package com.yuankai.aispringboot.DTO.response;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
 /**
  * 数据分析仪表盘响应结构。
  * 与前端 展示区域一一对应：概览卡片、情绪趋势、咨询统计、用户活跃度。
+ *
+ * 注意：本类会被整块序列化进 Redis 缓存并反序列化回来，
+ * 因此本类与所有嵌套类都必须保留 @NoArgsConstructor（Jackson 反序列化需要无参构造），
+ * @AllArgsConstructor 供 @Builder 生成构建器使用，两者都不能删。
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class DataAnalyticsResponseDTO {
 
     // 系统概览（顶部四张卡片）
@@ -27,6 +35,8 @@ public class DataAnalyticsResponseDTO {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class SystemOverview {
         // 总用户数
         private Long userTotal;
@@ -52,6 +62,8 @@ public class DataAnalyticsResponseDTO {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class EmotionTrend {
         // 日记日期
         private String date;
@@ -65,6 +77,8 @@ public class DataAnalyticsResponseDTO {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ConsultationStats {
         // 会话总数
         private Long totalSessions;
@@ -78,6 +92,8 @@ public class DataAnalyticsResponseDTO {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ConsultationDaily {
         // 日期
         private String date;
@@ -91,6 +107,8 @@ public class DataAnalyticsResponseDTO {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class UserActivity {
         // 日期
         private String date;

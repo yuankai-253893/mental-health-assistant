@@ -12,17 +12,32 @@ import com.yuankai.aispringboot.mapper.ConsultationMessageMapper;
 import com.yuankai.aispringboot.mapper.ConsultationSessionMapper;
 import com.yuankai.aispringboot.mapper.EmotionDiaryMapper;
 import com.yuankai.aispringboot.mapper.UserMapper;
+import com.yuankai.aispringboot.consts.RedisKeyConsts;
+import cn.hutool.core.util.StrUtil;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class DataAnalyticsService {
+
+    /**
+     * 仪表盘聚合缓存 TTL（秒）。
+     * 一屏数据由 12 条 SQL 聚合 + 1 次 Redis 计数拼出、管理端不要求强实时，
+     * 60 秒内只查库一次，把「一屏 = 12 次聚合」压成「60 秒内 N 次请求 = 1 次 GET」。
+     */
+    private static final long ANALYTICS_CACHE_TTL_SECONDS = 60;
+
     @Autowired
     private UserMapper userMapper;
 
@@ -38,7 +53,45 @@ public class DataAnalyticsService {
     @Autowired
     private ActiveUserRecordService activeUserRecordService;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    // 复用 Spring 容器中已配置好的 ObjectMapper（Spring Boot 4 使用 Jackson 3，类型为 tools.jackson.databind.ObjectMapper）
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    /**
+     * 数据分析仪表盘（Cache Aside：读缓存 → 未命中查库 → 回填缓存）。
+     * Redis 全程 fail-open：读失败 / 反序列化失败 / 写失败都只记日志，不影响数据返回。
+     */
     public DataAnalyticsResponseDTO getDataAnalytics() {
+        // 1. 缓存优先：命中直接返回，避免一屏触发 12 条聚合查询
+        try {
+            String cached = redisTemplate.opsForValue().get(RedisKeyConsts.DATA_ANALYTICS_OVERVIEW_KEY);
+            if (StrUtil.isNotBlank(cached)) {
+                log.info("数据分析仪表盘缓存命中");
+                return objectMapper.readValue(cached, DataAnalyticsResponseDTO.class);
+            }
+        } catch (Exception e) {
+            // Redis 不可用 / 缓存 JSON 与当前 DTO 结构不兼容（如字段增删）都回退查库，不阻塞主流程
+            log.warn("数据分析仪表盘缓存读取失败，回退数据库查询", e);
+        }
+
+        // 2. 未命中 → 查库聚合
+        DataAnalyticsResponseDTO result = buildDataAnalytics();
+
+        // 3. 回填缓存（TTL 兜底；聚合数据来自全站实时写入，没有合适的主动失效时机，靠 TTL 到期自然刷新）
+        try {
+            redisTemplate.opsForValue().set(RedisKeyConsts.DATA_ANALYTICS_OVERVIEW_KEY,
+                    objectMapper.writeValueAsString(result), ANALYTICS_CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("数据分析仪表盘缓存写入失败", e);
+        }
+        return result;
+    }
+
+    // 查库聚合：4 张表 COUNT + 1 条情绪均值 + 2 条「今日新增」+ 5 条「近 7 日」分组，共 12 条 SQL
+    private DataAnalyticsResponseDTO buildDataAnalytics() {
         // 各表总数
         Long userTotal = userMapper.selectCount(null);
         Long emotionDiaryTotal = emotionDiaryMapper.selectCount(null);

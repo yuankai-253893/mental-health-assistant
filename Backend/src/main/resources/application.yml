@@ -25,6 +25,9 @@ spring:
       port: 6379
       password:
       database: 0
+      # 建连 / 命令超时（关键：fail-open 的前提）
+      timeout: 2s
+      connect-timeout: 2s
 
 #mybatis-plus:
 #  configuration:

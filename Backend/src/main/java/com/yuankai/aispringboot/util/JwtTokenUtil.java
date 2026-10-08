@@ -104,8 +104,10 @@ public class JwtTokenUtil implements ApplicationContextAware {
                 roleType = Integer.valueOf(roleTypeStr);
             }
         }
+        // 签发时间（秒）：用于「改密即踢下线」判定 token 是否早于最近一次密码变更
+        Long issuedAtSeconds = jwt.getIssuedAt() != null ? jwt.getIssuedAt().getTime() / 1000 : null;
         if (userId != null && username != null && roleType != null) {
-            return new TokenVerificationResult(userId, username, roleType, true);
+            return new TokenVerificationResult(userId, username, roleType, true, issuedAtSeconds);
         }
         return null;
     }
@@ -132,11 +134,16 @@ public class JwtTokenUtil implements ApplicationContextAware {
         private final Integer roleType;
         private final boolean valid;
 
-        public TokenVerificationResult(Long userId, String username, Integer roleType, boolean valid) {
+        /** 签发时间（秒），取自 JWT 的 iat；老 token 或解析异常时可能为 null */
+        private final Long issuedAtSeconds;
+
+        public TokenVerificationResult(Long userId, String username, Integer roleType, boolean valid,
+                                       Long issuedAtSeconds) {
             this.userId = userId;
             this.username = username;
             this.roleType = roleType;
             this.valid = valid;
+            this.issuedAtSeconds = issuedAtSeconds;
         }
     }
 }

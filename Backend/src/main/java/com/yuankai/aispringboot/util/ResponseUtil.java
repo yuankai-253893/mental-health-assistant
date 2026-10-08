@@ -20,7 +20,10 @@ public class ResponseUtil {
     public static void writeError(HttpServletResponse response, ResultCode resultCode) {
         // 根据不同结果码返回不同的响应
         int status = switch (resultCode) {
-            case UNAUTHORIZED, ACCESS_UNAUTHORIZED, TOKEN_INVALID,TOKEN_BLOCKED -> HttpStatus.UNAUTHORIZED.value();
+            // TOKEN_PASSWORD_CHANGED 也归入 401：改密后旧 token 等同于"登录态失效"，
+            // 前端拦截器对 401 已有统一的清理凭证 + 跳登录处理，无需为它单开一条分支
+            case UNAUTHORIZED, ACCESS_UNAUTHORIZED, TOKEN_INVALID, TOKEN_BLOCKED, TOKEN_PASSWORD_CHANGED ->
+                    HttpStatus.UNAUTHORIZED.value();
             case TOKEN_ACCESS_FORBIDDEN -> HttpStatus.FORBIDDEN.value();
             default -> HttpStatus.BAD_REQUEST.value();
         };

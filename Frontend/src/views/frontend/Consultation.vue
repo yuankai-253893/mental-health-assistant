@@ -31,7 +31,7 @@
                             <span v-for="dot in 3" :key="dot" class="dot" :class="{'active': getIntensityClass(currentEmotion.emotionScore) >= dot}"></span>
                         </span>
                         <span class="intensity-text">
-                            {{ getRiskText(currentEmotion.riskLevel) }}
+                            {{ riskLevelShortText(currentEmotion.riskLevel) }}
                         </span>
                     </div>
                     <!-- 温暖建议卡片 -->
@@ -148,7 +148,13 @@
                 </span>
             </div>
             <!-- 聊天消息区域 -->
-            <div class="chat-messages">
+            <div class="chat-messages" ref="messagesRef">
+                <!-- 默认只加载最近一批，还有更早的历史时给出入口 -->
+                <div v-if="hasMoreMessages" class="load-earlier">
+                    <el-button text size="small" :loading="loadingMoreMessages" @click="loadEarlierMessages">
+                        加载更早的消息
+                    </el-button>
+                </div>
                 <!-- 欢迎用语 -->
                 <div class="message-item ai-message" v-if="messages.length === 0">
                     <div class="message-avatar">
@@ -218,12 +224,14 @@
 
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { startSession, getSessionPage, deleteSession, getSessionMessages, getSessionEmotion, updateSessionTitle } from '@/api/consultation'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatRound, DeleteFilled } from '@element-plus/icons-vue'
 import MarkdownRenderer from '@/components/frontend/MarkdownRenderer.vue'
 import { formatDateTime } from '@/utils/format'
+// 情绪/风险映射统一收敛到 utils，避免与管理端各存一份后漂移
+import { riskLevelShortText, parseEmotionAnalysis } from '@/utils/emotion'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import iconUrl from '@/assets/images/robot-fill.png'
 import iconUrl1 from '@/assets/images/like.png'
@@ -246,6 +254,7 @@ const createNewFrontendSession = () => {
     // 清空当前对话与情绪展示，给出可见的切换反馈
     messages.value = []
     currentEmotion.value = { ...defaultEmotion }
+    resetMessagePaging()
 }
 
 // 定义一个当前会话对象
@@ -258,6 +267,71 @@ const messages = ref([])
 const userMessage = ref('')
 // 定义AI助手是否正在输入
 const isAiTyping = ref(false)
+
+// ===== 消息分页（向前加载更早的历史）=====
+// 后端默认只返回最近 50 条，靠 beforeId 游标向前翻，避免超长会话一次性全读进内存
+const MESSAGE_PAGE_SIZE = 50
+const hasMoreMessages = ref(false)
+// 当前已加载的「最早一条消息」的库内 id，作为下一次向前翻页的游标
+const oldestMessageId = ref(null)
+const loadingMoreMessages = ref(false)
+// 消息滚动容器：插入历史消息后需要按高度差补偿 scrollTop，否则视野会跳走
+const messagesRef = ref(null)
+
+const resetMessagePaging = () => {
+    hasMoreMessages.value = false
+    oldestMessageId.value = null
+    loadingMoreMessages.value = false
+}
+
+// 当前会话在库里的真实 id（去掉 SSE 流使用的 session_ 前缀）；临时会话返回 null
+const resolveCurrentSessionId = () => {
+    const raw = currentSession.value?.sessionId
+    if (!raw || String(raw).startsWith('temp_')) return null
+    return Number(String(raw).replace(/^session_/, ''))
+}
+
+// 加载最近一批消息（进入会话时调用）
+const loadSessionMessages = async (sessionId) => {
+    const res = await getSessionMessages(sessionId, { limit: MESSAGE_PAGE_SIZE })
+    const records = res?.records || []
+    messages.value = records
+    hasMoreMessages.value = !!res?.hasMore
+    // 列表按时间升序，首条即最早的一条
+    oldestMessageId.value = records.length ? records[0].id : null
+}
+
+// 向前加载更早的历史：以当前最早一条消息 id 为游标，结果插到列表头部
+const loadEarlierMessages = async () => {
+    const sessionId = resolveCurrentSessionId()
+    if (!sessionId || oldestMessageId.value === null || loadingMoreMessages.value) return
+
+    loadingMoreMessages.value = true
+    const container = messagesRef.value
+    const prevScrollHeight = container?.scrollHeight || 0
+    const prevScrollTop = container?.scrollTop || 0
+    try {
+        const res = await getSessionMessages(sessionId, {
+            limit: MESSAGE_PAGE_SIZE,
+            beforeId: oldestMessageId.value
+        })
+        const earlier = res?.records || []
+        if (earlier.length) {
+            messages.value = [...earlier, ...messages.value]
+            oldestMessageId.value = earlier[0].id
+        }
+        hasMoreMessages.value = !!res?.hasMore
+        // 等 DOM 更新完再按新增高度下移视野，视觉上"停在原来那条消息上"
+        await nextTick()
+        if (container) {
+            container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight)
+        }
+    } catch (e) {
+        // 失败提示已由 request.js 统一弹出
+    } finally {
+        loadingMoreMessages.value = false
+    }
+}
 
 // 情绪花园默认值（接口无分析结果时兜底，避免模板取值报错）
 const defaultEmotion = {
@@ -292,7 +366,8 @@ const loadSessionEmotion = (sessionId) => {
     return getSessionEmotion(id).then(res => {
         // 接口返回 { sessionId, lastEmotionAnalysis, lastEmotionUpdatedAt }
         // 真正的分析结果在 lastEmotionAnalysis 中，且尚未生成时为 null
-        currentEmotion.value = { ...defaultEmotion, ...(res?.lastEmotionAnalysis || {}) }
+        // （该字段可能是对象也可能是 JSON 字符串，交给 parseEmotionAnalysis 统一处理）
+        currentEmotion.value = { ...defaultEmotion, ...(parseEmotionAnalysis(res?.lastEmotionAnalysis) || {}) }
         return res?.lastEmotionUpdatedAt || null
     }).catch(() => {
         // 情绪分析拉取失败（如尚未生成）时保持默认值，不打断对话
@@ -328,21 +403,6 @@ const getIntensityClass = (score) => {
         return 2
     }
     return 1
-}
-
-const getRiskText = (level) => {
-    switch (level) {
-        case 0:
-            return '正常'
-        case 1:
-            return '关注'
-        case 2:
-            return '预警'
-        case 3:
-            return '危机'
-        default:
-            return '正常'
-    }
 }
 
 // 定义处理键盘事件：Enter 发送消息，Shift+Enter 换行
@@ -529,20 +589,20 @@ const loadSessionList = () => {
 
 // 获取会话数据
 const handleSessionClick = (session) => {
-    // 点击会话时，获取会话详情
-    getSessionMessages(session.id).then(res => {
-        messages.value = res
-    }).catch(() => {
-        // 失败提示已由拦截器统一处理
-    })
-    loadSessionEmotion(session.id)
-    // 更新当前会话对象数据
-    const sessionData = {
+    // 先切换当前会话，后续「加载更早」才能从当前会话解析出真实 id
+    currentSession.value = {
         sessionId: "session_" + session.id,
         status: 'ACTIVE',
         sessionTitle: session.sessionTitle
     }
-    currentSession.value = sessionData
+    resetMessagePaging()
+    messages.value = []
+    loadSessionMessages(session.id).catch(() => {
+        // 失败提示已由拦截器统一处理
+        messages.value = []
+        resetMessagePaging()
+    })
+    loadSessionEmotion(session.id)
 }
 
 const handleDeleteSession = (sessionId) => {
@@ -1139,6 +1199,12 @@ onUnmounted(() => {
             max-height: calc(100vh - 270px);
             scrollbar-width: thin;
             scrollbar-color: rgba(251, 146, 60, 0.3) transparent;
+            // 「加载更早」入口：置于消息流顶部，无更多历史时整个节点不渲染
+            .load-earlier {
+                display: flex;
+                justify-content: center;
+                flex-shrink: 0;
+            }
             .message-item {
                 display: flex;
                 align-items: flex-start;

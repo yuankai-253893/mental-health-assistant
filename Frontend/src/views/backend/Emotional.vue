@@ -93,7 +93,7 @@
                     <div class="ai-analysis-result" v-if="hasAiAnalysis">
                         <el-descriptions :column="2" border>
                             <el-descriptions-item label="主要情绪">
-                                <el-tag :type="getAiEmotionTagType(aiData.primaryEmotion)">{{
+                                <el-tag :type="getEmotionTagType(aiData.primaryEmotion)">{{
                                     aiData.primaryEmotion}}</el-tag>
                             </el-descriptions-item>
                             <el-descriptions-item label="情绪积极度">
@@ -192,57 +192,9 @@ import TableSearch from '@/components/backend/TableSearch.vue'
 import { getEmotionalPage, deleteEmotional, getAnalysisTaskPage, retryAnalysisTask, analyzeDiaryAsAdmin } from '@/api/admin'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
-
-const getEmotionTagType = (emotion) => {
-    const emotionTypes = {
-        '快乐': 'success',
-        '平静': 'info',
-        '兴奋': 'warning',
-        '愤怒': 'danger',
-        '悲伤': 'info',
-        '焦虑': 'warning'
-    }
-    return emotionTypes[emotion] || 'info'
-}
-
-const getAiEmotionTagType = (emotion) => {
-    const emotionTagMap = {
-        '快乐': 'success',
-        '平静': 'success',
-        '兴奋': 'warning',
-        '满足': 'success',
-        '愤怒': 'danger',
-        '悲伤': 'info',
-        '焦虑': 'warning',
-        '恐惧': 'danger',
-        '沮丧': 'info',
-        '压力': 'warning'
-    }
-    return emotionTagMap[emotion] || 'info'
-}
-
-const getEmotionScoreColor = (score) => {
-    // emotionScore 是 0-100 的「积极程度」，越高越积极，故高分用绿色
-    if (score >= 80) return '#67c23a'
-    if (score >= 60) return '#95d475'
-    if (score >= 40) return '#e6a23c'
-    return '#f56c6c'
-}
-
-// 风险等级：0-正常 1-需关注 2-需心理疏导 3-危机
-const RISK_LEVEL_TEXT = ['情绪稳定', '需要关注', '需要心理疏导', '危机预警']
-
-const riskLevelText = (level) => {
-    if (level === null || level === undefined || level === '') return '-'
-    return RISK_LEVEL_TEXT[level] || '未知'
-}
-
-const getRiskTagType = (level) => {
-    if (level >= 3) return 'danger'
-    if (level >= 2) return 'warning'
-    if (level >= 1) return 'info'
-    return 'success'
-}
+// 情绪映射与查询条件判断统一收敛到 utils，避免与「咨询记录」页各存一份后漂移
+import { getEmotionTagType, getEmotionScoreColor, riskLevelText, getRiskTagType } from '@/utils/emotion'
+import { isFilled } from '@/utils/query'
 
 const formItem = [
     { comp: 'input', prop: 'userId', label: '用户ID', placeholder: '请输入用户ID' },
@@ -279,9 +231,6 @@ const handleChange = (page) => {
 
 // 保存最近一次查询条件，翻页时沿用，避免丢失筛选
 const queryForm = reactive({})
-
-// 只拼接真正填写过的条件，空值不传（后端 userId 是 Long，空串会导致绑定失败）
-const isFilled = (val) => val !== '' && val !== null && val !== undefined
 
 const handleSearch = async (formData) => {
     if (formData) {

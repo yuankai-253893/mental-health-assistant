@@ -36,6 +36,7 @@ public enum ResultCode {
     TOKEN_EXPIRED("A0231", "token已过期"),
     TOKEN_BLOCKED("A0232", "token已加入黑名单"),
     TOKEN_ACCESS_FORBIDDEN("A0233", "token已被禁止访问"),
+    TOKEN_PASSWORD_CHANGED("A0234", "密码已变更，请重新登录"),
     AUTHORIZED_ERROR("A0300", "访问权限异常"),
     ACCESS_UNAUTHORIZED("A0301", "访问未授权");
 

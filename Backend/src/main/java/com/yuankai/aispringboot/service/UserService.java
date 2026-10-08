@@ -7,6 +7,7 @@ import com.yuankai.aispringboot.DTO.command.UserLoginCommandDTO;
 import com.yuankai.aispringboot.DTO.command.UserRegisterCommandDTO;
 import com.yuankai.aispringboot.DTO.query.UserQueryDTO;
 import com.yuankai.aispringboot.common.ResultCode;
+import com.yuankai.aispringboot.config.JwtConfig;
 import com.yuankai.aispringboot.consts.RedisKeyConsts;
 import com.yuankai.aispringboot.DTO.response.UserLoginResponseDTO;
 import com.yuankai.aispringboot.entity.User;
@@ -49,6 +50,12 @@ public class UserService {
 
     @Resource
     private RedisTokenBlacklist redisTokenBlacklist;
+
+    @Resource
+    private TokenInvalidationService tokenInvalidationService;
+
+    @Resource
+    private JwtConfig jwtConfig;
 
     @Resource
     private RedisCounterUtil redisCounterUtil;
@@ -325,10 +332,6 @@ public class UserService {
 
     /**
      * 重置用户密码（管理员）。
-     *
-     * 已知限制：JWT 是无状态的，改密码不会让已签发的 token 失效
-     * （token 里不携带密码信息）。若需要「改密即踢下线」，得再引入
-     * 按用户的失效时间戳，当前未实现。
      */
     public void resetPassword(Long userId, String newPassword) {
         User user = userMapper.selectById(userId);
@@ -341,6 +344,9 @@ public class UserService {
         update.setPassword(PasswordEncoder.encode(newPassword.trim()));
         update.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(update);
+
+        // 让改密前签发的 token 全部失效（含该用户可能存在的多端登录）
+        tokenInvalidationService.markPasswordChanged(userId, jwtConfig.getExpiration());
 
         // 清掉该账号残留的登录失败计数，避免用新密码登录时被旧的锁定计数拦住
         try {

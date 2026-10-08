@@ -67,6 +67,7 @@ import TableSearch from '@/components/backend/TableSearch.vue'
 import { getUserPage, updateUserStatus, resetUserPassword } from '@/api/admin'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
+import { isFilled } from '@/utils/query'
 
 // 当前登录用户 id：用于隐藏「禁用自己」的入口
 const currentUserId = (() => {
@@ -105,10 +106,6 @@ const pagination = reactive({
 
 // 保存最近一次查询条件，翻页时沿用，避免丢失筛选
 const queryForm = reactive({})
-
-// 只拼接真正填写过的条件。
-// 注意不能用真值判断：status 允许取 0（禁用），'' 与 0 必须区分开
-const isFilled = (val) => val !== '' && val !== null && val !== undefined
 
 const handleSearch = async (formData) => {
     // 表单触发查询时才覆盖条件并回到第一页；翻页传 undefined，沿用上次条件

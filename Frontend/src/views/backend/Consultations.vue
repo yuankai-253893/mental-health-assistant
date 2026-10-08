@@ -150,7 +150,13 @@
                     <div class="messages-header">
                         <h4>对话记录</h4>
                     </div>
-                    <div class="messages-list" v-loading="loadingMessages">
+                    <div class="messages-list" v-loading="loadingMessages" ref="messagesListRef">
+                        <!-- 默认只加载最近一批，还有更早的历史时给出入口 -->
+                        <div v-if="hasMoreMessages" class="load-earlier">
+                            <el-button text size="small" :loading="loadingMoreMessages" @click="loadEarlierMessages">
+                                加载更早的消息
+                            </el-button>
+                        </div>
                         <el-empty v-if="!loadingMessages && sessionMessages.length === 0" description="暂无对话记录" />
                         <div v-for="message in sessionMessages" :key="message.id" class="message-item" :class="message.senderType === 1 ? 'user-message' : 'ai-message'">
                             <div class="message-header">
@@ -169,12 +175,14 @@
     </div>
 </template>
 <script setup>
-import { onMounted, ref, reactive, computed } from 'vue'
+import { onMounted, ref, reactive, computed, nextTick } from 'vue'
 import PageHead from '@/components/backend/PageHead.vue'
 import TableSearch from '@/components/backend/TableSearch.vue'
 import { getSessionPage, getSessionMessages, updateSessionTitle, deleteSession } from '@/api/consultation'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
+// 情绪映射统一收敛到 utils，避免与「情绪日志」页各存一份后漂移
+import { getEmotionTagType, getEmotionScoreColor, riskLevelText, getRiskTagType, parseEmotionAnalysis } from '@/utils/emotion'
 
 // 查询条件：userId 供管理员把范围缩小到指定用户；emotionTag 按情绪分析结果模糊匹配
 const formItem = ref([
@@ -196,62 +204,6 @@ const queryForm = reactive({})
 
 // 会话 ID -> 解析后的情绪分析结果，避免模板里对同一行重复 JSON.parse
 const emotionMap = ref({})
-
-/**
- * 会话情绪分析结果以 JSON 字符串存储，解析失败或为空时返回 null，
- * 让界面走「未分析」分支，而不是渲染出 undefined 的空壳。
- */
-const parseEmotion = (raw) => {
-    if (!raw) return null
-    try {
-        const data = JSON.parse(raw)
-        return data && Object.keys(data).length ? data : null
-    } catch (e) {
-        return null
-    }
-}
-
-// 与后台「情绪日志」页保持同一套配色
-const getEmotionTagType = (emotion) => {
-    const map = {
-        '快乐': 'success',
-        '开心': 'success',
-        '平静': 'success',
-        '满足': 'success',
-        '兴奋': 'warning',
-        '焦虑': 'warning',
-        '压力': 'warning',
-        '愤怒': 'danger',
-        '恐惧': 'danger',
-        '悲伤': 'info',
-        '沮丧': 'info',
-        '低落': 'info'
-    }
-    return map[emotion] || 'info'
-}
-
-// emotionScore 是 0-100 的「积极程度」，越高越积极，故高分用绿色
-const getEmotionScoreColor = (score) => {
-    if (score >= 80) return '#67c23a'
-    if (score >= 60) return '#95d475'
-    if (score >= 40) return '#e6a23c'
-    return '#f56c6c'
-}
-
-// 风险等级：0-正常 1-需关注 2-需心理疏导 3-危机
-const RISK_LEVEL_TEXT = ['情绪稳定', '需要关注', '需要心理疏导', '危机预警']
-
-const riskLevelText = (level) => {
-    if (level === null || level === undefined || level === '') return '-'
-    return RISK_LEVEL_TEXT[level] || '未知'
-}
-
-const getRiskTagType = (level) => {
-    if (level >= 3) return 'danger'
-    if (level >= 2) return 'warning'
-    if (level >= 1) return 'info'
-    return 'success'
-}
 
 const handleSearch = async (formData) => {
     // 表单触发查询时才覆盖条件并回到第一页；翻页传 undefined，沿用上次条件
@@ -277,7 +229,7 @@ const handleSearch = async (formData) => {
 
         const map = {}
         list.forEach(row => {
-            map[row.id] = parseEmotion(row.lastEmotionAnalysis)
+            map[row.id] = parseEmotionAnalysis(row.lastEmotionAnalysis)
         })
         emotionMap.value = map
     } catch (e) {
@@ -301,18 +253,77 @@ const sessionMessages = ref([])
 const loadingMessages = ref(false)
 const showDetailDialog = ref(false)
 
+// ===== 消息分页（向前加载更早的历史）=====
+// 后端默认只返回最近 50 条，靠 beforeId 游标向前翻，避免超长会话一次性全读进内存
+const MESSAGE_PAGE_SIZE = 50
+const hasMoreMessages = ref(false)
+// 当前已加载的「最早一条消息」的库内 id，作为下一次向前翻页的游标
+const oldestMessageId = ref(null)
+const loadingMoreMessages = ref(false)
+const messagesListRef = ref(null)
+
+const resetMessagePaging = () => {
+    hasMoreMessages.value = false
+    oldestMessageId.value = null
+    loadingMoreMessages.value = false
+}
+
+// 加载最近一批消息
+const loadSessionMessages = async (sessionId) => {
+    const res = await getSessionMessages(sessionId, { limit: MESSAGE_PAGE_SIZE })
+    const records = res?.records || []
+    sessionMessages.value = records
+    hasMoreMessages.value = !!res?.hasMore
+    // 列表按时间升序，首条即最早的一条
+    oldestMessageId.value = records.length ? records[0].id : null
+}
+
+// 向前加载更早的历史：以当前最早一条消息 id 为游标，结果插到列表头部
+const loadEarlierMessages = async () => {
+    const sessionId = sessionDetail.value?.id
+    if (!sessionId || oldestMessageId.value === null || loadingMoreMessages.value) return
+
+    loadingMoreMessages.value = true
+    const container = messagesListRef.value
+    const prevScrollHeight = container?.scrollHeight || 0
+    const prevScrollTop = container?.scrollTop || 0
+    try {
+        const res = await getSessionMessages(sessionId, {
+            limit: MESSAGE_PAGE_SIZE,
+            beforeId: oldestMessageId.value
+        })
+        const earlier = res?.records || []
+        if (earlier.length) {
+            sessionMessages.value = [...earlier, ...sessionMessages.value]
+            oldestMessageId.value = earlier[0].id
+        }
+        hasMoreMessages.value = !!res?.hasMore
+        // 等 DOM 更新完再按新增高度下移视野，避免插入后视野跳到最顶部
+        await nextTick()
+        if (container) {
+            container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight)
+        }
+    } catch (e) {
+        // 失败提示已由响应拦截器统一弹出
+    } finally {
+        loadingMoreMessages.value = false
+    }
+}
+
 // 详情里可展示的情绪分析结果，为空时整块换成空状态提示
-const detailEmotion = computed(() => parseEmotion(sessionDetail.value.lastEmotionAnalysis))
+const detailEmotion = computed(() => parseEmotionAnalysis(sessionDetail.value.lastEmotionAnalysis))
 
 const viewSessionDetail = async (row) => {
     sessionDetail.value = row
     sessionMessages.value = []
+    resetMessagePaging()
     showDetailDialog.value = true
     loadingMessages.value = true
     try {
-        sessionMessages.value = await getSessionMessages(row.id) || []
+        await loadSessionMessages(row.id)
     } catch (e) {
         sessionMessages.value = []
+        resetMessagePaging()
     } finally {
         loadingMessages.value = false
     }
@@ -321,6 +332,7 @@ const viewSessionDetail = async (row) => {
 const handleDetailClosed = () => {
     sessionMessages.value = []
     sessionDetail.value = {}
+    resetMessagePaging()
 }
 
 // 改名
@@ -514,6 +526,13 @@ onMounted(() => {
             border-radius: 8px;
             padding: 16px;
             background: #fff;
+
+            // 「加载更早」入口：置于消息流顶部，无更多历史时整个节点不渲染
+            .load-earlier {
+                display: flex;
+                justify-content: center;
+                margin-bottom: 8px;
+            }
 
             .message-item {
                 margin-bottom: 12px;

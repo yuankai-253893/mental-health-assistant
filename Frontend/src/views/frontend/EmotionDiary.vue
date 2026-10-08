@@ -140,6 +140,8 @@
     import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
     import { createOrUpdateEmotionDiary, getTodayEmotionDiary, triggerDiaryAnalysis, getDiaryAnalysisTask } from '@/api/user'
     import { Refresh, Loading } from '@element-plus/icons-vue'
+    // 情绪映射与解析统一收敛到 utils，避免各页面各存一份后漂移
+    import { getRiskTagType, parseEmotionAnalysis } from '@/utils/emotion'
 
     // 情绪评分
     const emotionStatus = ['绝望崩溃', '消沉抑郁', '焦虑烦躁', '低落不悦', '平静淡然', '轻松惬意', '愉悦舒心', '欢欣满足', '兴奋欣喜', '极致幸福']
@@ -221,13 +223,7 @@
     const POLL_INTERVAL = 2000
     const MAX_POLL_ATTEMPTS = 30
 
-    const riskTagType = computed(() => {
-        const level = analysisResult.value?.riskLevel
-        if (level >= 3) return 'danger'
-        if (level >= 2) return 'warning'
-        if (level >= 1) return 'info'
-        return 'success'
-    })
+    const riskTagType = computed(() => getRiskTagType(analysisResult.value?.riskLevel))
 
     const stopPolling = () => {
         if (pollTimer) {
@@ -237,25 +233,13 @@
         analyzing.value = false
     }
 
-    // 后端把分析结果以 JSON 字符串存库，这里兼容「字符串」与「已解析对象」两种形态
-    const parseAnalysis = (raw) => {
-        if (!raw) return null
-        if (typeof raw === 'object') return raw
-        try {
-            return JSON.parse(raw)
-        } catch (e) {
-            // 历史脏数据解析失败按「暂无分析结果」处理，不让整页崩掉
-            return null
-        }
-    }
-
     // 重新拉取今日日记，取回最新的分析结果
     const reloadDiary = async () => {
         try {
             const data = await getTodayEmotionDiary()
             if (!data) return
             diaryId.value = data.id
-            analysisResult.value = parseAnalysis(data.aiEmotionAnalysis)
+            analysisResult.value = parseEmotionAnalysis(data.aiEmotionAnalysis)
         } catch (e) {
             // 静默处理：分析结果拉取失败不影响表单
         }
@@ -329,7 +313,7 @@
             fillForm(data)
             if (data) {
                 diaryId.value = data.id
-                analysisResult.value = parseAnalysis(data.aiEmotionAnalysis)
+                analysisResult.value = parseEmotionAnalysis(data.aiEmotionAnalysis)
                 checkRunningTask()
             }
         } catch (e) {
@@ -355,7 +339,7 @@
             fillForm(res)
             if (res) {
                 diaryId.value = res.id
-                analysisResult.value = parseAnalysis(res.aiEmotionAnalysis)
+                analysisResult.value = parseEmotionAnalysis(res.aiEmotionAnalysis)
                 // 保存日记时后端会自动入队 AI 分析任务，这里直接开始轮询进度
                 startPolling()
             }
